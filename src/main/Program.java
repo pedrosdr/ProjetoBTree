@@ -1,43 +1,47 @@
 package main;
 
 import entities.BTree;
-import entities.KAPair;
+import entities.IntegerKeySerializer;
 import entities.Node;
-
-import java.util.HashMap;
-import java.util.LinkedList;
 
 public class Program {
     public static void main(String[] args) {
-        HashMap<Integer, Node> file = new HashMap<>();
+        BTree<Integer> btree = new BTree<>(
+                "data.bin",
+                3,
+                new IntegerKeySerializer()
+        );
 
-        Node node = new Node();
-        node.setA0(0);
-        node.addKAPair(0, new KAPair(20, 3));
-        node.addKAPair(1, new KAPair(40, 4));
-        file.put(1, node);
+        Node<Integer> a = new Node<>(3);
+        a.setA0(2);
+        a.addKAPair(20, 3);
+        a.addKAPair(40, 4);
 
-        node = new Node();
-        node.addKAPair(0, new KAPair(10, 0));
-        node.addKAPair(1, new KAPair(15, 0));
-        file.put(2, node);
+        Node<Integer> b = new Node<>(3);
+        b.setA0(0);
+        b.addKAPair(10, 0);
+        b.addKAPair(15, 0);
 
-        node = new Node();
-        node.addKAPair(0, new KAPair(25, 0));
-        node.addKAPair(1, new KAPair(30, 5));
-        file.put(3, node);
+        Node<Integer> c = new Node<>(3);
+        c.setA0(0);
+        c.addKAPair(25, 0);
+        c.addKAPair(30, 5);
 
-        node = new Node();
-        node.addKAPair(0, new KAPair(45, 0));
-        node.addKAPair(1, new KAPair(60, 0));
-        file.put(4, node);
+        Node<Integer> d = new Node<>(3);
+        d.setA0(0);
+        d.addKAPair(45, 0);
+        d.addKAPair(50, 0);
 
-        node = new Node();
-        node.addKAPair(0, new KAPair(35, 0));
-        file.put(5, node);
+        Node<Integer> e = new Node<>(3);
+        e.setA0(0);
+        e.addKAPair(35, 0);
 
-        BTree btree = new BTree(file);
+        btree.writeNode(1, a);
+        btree.writeNode(2, b);
+        btree.writeNode(3, c);
+        btree.writeNode(4, d);
+        btree.writeNode(5, e);
 
-        System.out.println(btree);
+        System.out.println(btree.dump(1, 5));
     }
 }
