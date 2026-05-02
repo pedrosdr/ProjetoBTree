@@ -1,53 +1,42 @@
 package entities;
 
 public class Node {
-    // fields
     private final int m;
     private int n;
     private final int[] A;
     private final int[] K;
 
-    // constructors
-    @SuppressWarnings("unchecked")
     public Node(int m) {
+        if (m < 2) {
+            throw new IllegalArgumentException("m deve ser pelo menos 2");
+        }
+
         this.m = m;
         this.n = 0;
-        A = new int[m];
-        setA0(0);
-        K = new int[m+1];
+        this.A = new int[m];
+        this.K = new int[m - 1];
+
+        this.A[0] = 0;
     }
 
-    // properties
-    public int getN(){
-        return this.n;
+    public int getN() {
+        return n;
     }
 
     public int getM() {
         return m;
     }
 
-    public void setA0(int address) {
-        A[0] = address;
-    }
-
-    public int getA0() {
-        return A[0];
-    }
-
-    public int[] getA() {
-        return A;
+    public void setA0(int value) {
+        A[0] = value;
     }
 
     public int getA(int i) {
         return A[i];
     }
 
-    public int[] getK() {
-        return K;
-    }
-
     public int getK(int i) {
-        return K[i];
+        return K[i - 1];
     }
 
     public void addKAPair(int key, int address) {
@@ -55,9 +44,9 @@ public class Node {
             throw new IllegalStateException("Nó cheio");
         }
 
-        n++;
         K[n] = key;
-        A[n] = address;
+        A[n + 1] = address;
+        n++;
     }
 
     public void removeKAPairAt(int i) {
@@ -65,12 +54,14 @@ public class Node {
             throw new IndexOutOfBoundsException("Índice inválido: " + i);
         }
 
-        for (int j = i; j < n; j++) {
+        int index = i - 1;
+
+        for (int j = index; j < n - 1; j++) {
             K[j] = K[j + 1];
-            A[j] = A[j + 1];
+            A[j + 1] = A[j + 2];
         }
 
-        K[n] = 0;
+        K[n - 1] = 0;
         A[n] = 0;
         n--;
     }
@@ -85,7 +76,7 @@ public class Node {
 
         for (int i = 1; i <= n; i++) {
             sb.append(",(");
-            sb.append(K[i]);
+            sb.append(getK(i));
             sb.append(",");
             sb.append(A[i]);
             sb.append(")");

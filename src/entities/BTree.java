@@ -1,5 +1,6 @@
 package entities;
 
+import entities.Node;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 
@@ -9,7 +10,10 @@ public class BTree {
     private final String filePath;
     private final int m;
 
-    public BTree(String filePath, int m) {
+    private int root;
+    private int top;
+
+    private BTree(String filePath, int m) {
         if (filePath == null || filePath.isBlank()) {
             throw new IllegalArgumentException("filePath não pode ser vazio");
         }
@@ -20,8 +24,32 @@ public class BTree {
 
         this.filePath = filePath;
         this.m = m;
+    }
 
-        initializeFile();
+    public static BTree createNew(String filePath, int m) {
+        BTree btree = new BTree(filePath, m);
+
+        btree.root = 0;
+        btree.top = 0;
+        btree.initializeFile();
+
+        return btree;
+    }
+
+    public static BTree fromFile(String filePath) {
+        try (RandomAccessFile raf = new RandomAccessFile(filePath, "r")) {
+            int root = raf.readInt();
+            int m = raf.readInt();
+            int top = raf.readInt();
+
+            BTree btree = new BTree(filePath, m);
+            btree.root = root;
+            btree.top = top;
+
+            return btree;
+        } catch (IOException ex) {
+            throw new RuntimeException("Erro ao carregar arquivo da BTree", ex);
+        }
     }
 
     public String getFilePath() {
@@ -32,20 +60,34 @@ public class BTree {
         return m;
     }
 
+    public int getRoot() {
+        return root;
+    }
+
+    public int getTop() {
+        return top;
+    }
+
     private void initializeFile() {
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
-            if (raf.length() < HEADER_SIZE) {
-                raf.setLength(HEADER_SIZE);
-            }
+            raf.setLength(HEADER_SIZE);
+            writeHeader(raf);
         } catch (IOException ex) {
             throw new RuntimeException("Erro ao inicializar arquivo da BTree", ex);
         }
     }
 
+    private void writeHeader(RandomAccessFile raf) throws IOException {
+        raf.seek(0);
+        raf.writeInt(root);
+        raf.writeInt(m);
+        raf.writeInt(top);
+    }
+
     private int nodeSize() {
-        return Integer.BYTES                 // n
-                + Integer.BYTES * m          // A[0] até A[m - 1]
-                + Integer.BYTES * (m - 1); // K[1] até K[m - 1]
+        return Integer.BYTES
+                + Integer.BYTES * m
+                + Integer.BYTES * (m - 1);
     }
 
     private long nodePosition(int id) {
@@ -65,21 +107,33 @@ public class BTree {
             throw new IllegalArgumentException("node possui m diferente da BTree");
         }
 
-        try (RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
-            raf.seek(nodePosition(id));
+        if (node.getN() < 0 || node.getN() > m - 1) {
+            throw new IllegalArgumentException("n inválido no nó");
+        }
 
-            // 1. escreve n
+        try (RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
+            if (root == 0) {
+                root = id;
+            }
+
+            if (id > top) {
+                top = id;
+            }
+
+            writeHeader(raf);
+            raf.seek(nodePosition(id));
             raf.writeInt(node.getN());
 
-            // 2. escreve todos os As: A[0] até A[m - 1]
             for (int i = 0; i < m; i++) {
                 raf.writeInt(node.getA(i));
             }
 
-            // 3. escreve apenas os Ks reais: K[1] até K[m - 1]
             for (int i = 1; i <= m - 1; i++) {
-                int key = node.getK(i);
-                raf.writeInt(key);
+                if (i <= node.getN()) {
+                    raf.writeInt(node.getK(i));
+                } else {
+                    raf.writeInt(0);
+                }
             }
         } catch (IOException ex) {
             throw new RuntimeException("Erro ao escrever nó " + id, ex);
@@ -87,14 +141,12 @@ public class BTree {
     }
 
     public Node readNode(int id) {
-        long position = nodePosition(id);
+        if (!nodeExists(id)) {
+            return null;
+        }
 
-        try (RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
-            if (position >= raf.length()) {
-                return null;
-            }
-
-            raf.seek(position);
+        try (RandomAccessFile raf = new RandomAccessFile(filePath, "r")) {
+            raf.seek(nodePosition(id));
 
             // 1. lê n
             int n = raf.readInt();
@@ -103,16 +155,15 @@ public class BTree {
                 throw new IOException("Nó inválido: n = " + n);
             }
 
-            // 2. lê todos os As
+            // 2. lê todos os A
             int[] addresses = new int[m];
 
             for (int i = 0; i < m; i++) {
                 addresses[i] = raf.readInt();
             }
 
-            // 3. lê apenas os Ks reais
-            @SuppressWarnings("unchecked")
-            int[] keys = new int[m-1];
+            // 3. lê apenas os K reais
+            int[] keys = new int[m - 1];
 
             for (int i = 0; i < m - 1; i++) {
                 keys[i] = raf.readInt();
@@ -122,7 +173,7 @@ public class BTree {
             node.setA0(addresses[0]);
 
             for (int i = 1; i <= n; i++) {
-                node.addKAPair(keys[i-1], addresses[i]);
+                node.addKAPair(keys[i - 1], addresses[i]);
             }
 
             return node;
@@ -131,8 +182,37 @@ public class BTree {
         }
     }
 
+    public SearchResult search(int key) {
+        int p = root;
+        int q = 0;
+        int i = 0;
+
+        while (p != 0) {
+            Node node = readNode(p);
+
+            if (node == null) {
+                throw new IllegalStateException("Nó " + p + " não existe no arquivo");
+            }
+
+            i = 0;
+
+            while (i < node.getN() && key >= node.getK(i + 1)) {
+                i++;
+            }
+
+            if (i >= 1 && key == node.getK(i)) {
+                return new SearchResult(p, i, true);
+            }
+
+            q = p;
+            p = node.getA(i);
+        }
+
+        return new SearchResult(q, i, false);
+    }
+
     public boolean nodeExists(int id) {
-        if (id <= 0) {
+        if (id <= 0 || id > top) {
             return false;
         }
 
@@ -145,10 +225,18 @@ public class BTree {
 
     public void clear() {
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
+            root = 0;
+            top = 0;
+
             raf.setLength(HEADER_SIZE);
+            writeHeader(raf);
         } catch (IOException ex) {
             throw new RuntimeException("Erro ao limpar arquivo da BTree", ex);
         }
+    }
+
+    public String dump() {
+        return dump(1, top);
     }
 
     public String dump(int firstId, int lastId) {
