@@ -1,11 +1,11 @@
 package entities;
 
-public class Node<KType extends Comparable<KType>> {
+public class Node {
     // fields
     private final int m;
     private int n;
     private final int[] A;
-    private final KType[] K;
+    private final int[] K;
 
     // constructors
     @SuppressWarnings("unchecked")
@@ -14,7 +14,7 @@ public class Node<KType extends Comparable<KType>> {
         this.n = 0;
         A = new int[m];
         setA0(0);
-        K = (KType[]) new Comparable[m+1];
+        K = new int[m+1];
     }
 
     // properties
@@ -42,15 +42,15 @@ public class Node<KType extends Comparable<KType>> {
         return A[i];
     }
 
-    public KType[] getK() {
+    public int[] getK() {
         return K;
     }
 
-    public KType getK(int i) {
+    public int getK(int i) {
         return K[i];
     }
 
-    public void addKAPair(KType key, int address) {
+    public void addKAPair(int key, int address) {
         if (n >= m - 1) {
             throw new IllegalStateException("Nó cheio");
         }
@@ -70,7 +70,7 @@ public class Node<KType extends Comparable<KType>> {
             A[j] = A[j + 1];
         }
 
-        K[n] = null;
+        K[n] = 0;
         A[n] = 0;
         n--;
     }

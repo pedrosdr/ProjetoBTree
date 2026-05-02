@@ -3,14 +3,13 @@ package entities;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 
-public class BTree<KType extends Comparable<KType>> {
+public class BTree {
     private static final int HEADER_SIZE = 128;
 
     private final String filePath;
     private final int m;
-    private final KeySerializer<KType> keySerializer;
 
-    public BTree(String filePath, int m, KeySerializer<KType> keySerializer) {
+    public BTree(String filePath, int m) {
         if (filePath == null || filePath.isBlank()) {
             throw new IllegalArgumentException("filePath não pode ser vazio");
         }
@@ -19,13 +18,8 @@ public class BTree<KType extends Comparable<KType>> {
             throw new IllegalArgumentException("m deve ser pelo menos 2");
         }
 
-        if (keySerializer == null) {
-            throw new IllegalArgumentException("keySerializer não pode ser null");
-        }
-
         this.filePath = filePath;
         this.m = m;
-        this.keySerializer = keySerializer;
 
         initializeFile();
     }
@@ -51,7 +45,7 @@ public class BTree<KType extends Comparable<KType>> {
     private int nodeSize() {
         return Integer.BYTES                 // n
                 + Integer.BYTES * m          // A[0] até A[m - 1]
-                + keySerializer.size() * (m - 1); // K[1] até K[m - 1]
+                + Integer.BYTES * (m - 1); // K[1] até K[m - 1]
     }
 
     private long nodePosition(int id) {
@@ -62,7 +56,7 @@ public class BTree<KType extends Comparable<KType>> {
         return HEADER_SIZE + (long) (id - 1) * nodeSize();
     }
 
-    public void writeNode(int id, Node<KType> node) {
+    public void writeNode(int id, Node node) {
         if (node == null) {
             throw new IllegalArgumentException("node não pode ser null");
         }
@@ -84,20 +78,15 @@ public class BTree<KType extends Comparable<KType>> {
 
             // 3. escreve apenas os Ks reais: K[1] até K[m - 1]
             for (int i = 1; i <= m - 1; i++) {
-                KType key = node.getK(i);
-
-                if (key == null) {
-                    keySerializer.writeDefault(raf);
-                } else {
-                    keySerializer.write(raf, key);
-                }
+                int key = node.getK(i);
+                raf.writeInt(key);
             }
         } catch (IOException ex) {
             throw new RuntimeException("Erro ao escrever nó " + id, ex);
         }
     }
 
-    public Node<KType> readNode(int id) {
+    public Node readNode(int id) {
         long position = nodePosition(id);
 
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
@@ -123,13 +112,13 @@ public class BTree<KType extends Comparable<KType>> {
 
             // 3. lê apenas os Ks reais
             @SuppressWarnings("unchecked")
-            KType[] keys = (KType[]) new Comparable[m-1];
+            int[] keys = new int[m-1];
 
             for (int i = 0; i < m - 1; i++) {
-                keys[i] = keySerializer.read(raf);
+                keys[i] = raf.readInt();
             }
 
-            Node<KType> node = new Node<>(m);
+            Node node = new Node(m);
             node.setA0(addresses[0]);
 
             for (int i = 1; i <= n; i++) {
@@ -174,7 +163,7 @@ public class BTree<KType extends Comparable<KType>> {
         sb.append("-----------------------------------\n");
 
         for (int id = firstId; id <= lastId; id++) {
-            Node<KType> node = readNode(id);
+            Node node = readNode(id);
 
             if (node != null) {
                 sb.append(String.format("%-5d %s\n", id, node));
