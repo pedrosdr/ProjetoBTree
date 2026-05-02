@@ -1,0 +1,48 @@
+@startuml
+!pragma layout smetana
+
+title Diagrama UML - Projeto BTree
+
+class Program
+
+class BTree {
+  -filePath: String
+  -m: int
+  -root: int
+  -top: int
+  +createNew()
+  +fromFile()
+  +writeNode()
+  +readNode()
+  +search()
+  +clear()
+  +dump()
+}
+
+class Node {
+  -m: int
+  -n: int
+  -A: int array
+  -K: int array
+  +addKAPair()
+  +removeKAPairAt()
+}
+
+class KAPair {
+  -k: int
+  -a: int
+}
+
+class SearchResult {
+  -p: int
+  -i: int
+  -j: boolean
+}
+
+Program --> BTree
+Program --> Node
+BTree --> Node
+BTree --> SearchResult
+Node --> KAPair
+
+@enduml
