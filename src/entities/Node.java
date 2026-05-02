@@ -35,18 +35,54 @@ public class Node {
         return A[i];
     }
 
+    private void setA(int i, int value) {
+        A[i] = value;
+    }
+
     public int getK(int i) {
         return K[i - 1];
     }
 
+    private void setK(int i, int value) {
+        K[i-1] = value;
+    }
+
     public void addKAPair(int key, int address) {
+        int i = findInsertIndex(key);
+        addKAPair(i, key, address);
+    }
+
+    private void addKAPair(int i, int key, int address) {
         if (n >= m - 1) {
             throw new IllegalStateException("Nó cheio");
         }
 
-        K[n] = key;
-        A[n + 1] = address;
+        if (i <= 0 || i > n + 1) {
+            throw new IndexOutOfBoundsException("Índice inválido: " + i);
+        }
+
+        for(int j = n; j >= i; j--) {
+            setK(j+1, getK(j));
+            setA(j+1, getA(j));
+        }
+
+        setK(i, key);
+        setA(i, address);
         n++;
+    }
+
+    public int findChildIndex(int key) {
+        int i = 0;
+
+        while (i < n && key >= getK(i + 1)) {
+            i++;
+        }
+
+        return i;
+    }
+
+    private int findInsertIndex(int key) {
+        return findChildIndex(key) + 1;
     }
 
     public void removeKAPairAt(int i) {

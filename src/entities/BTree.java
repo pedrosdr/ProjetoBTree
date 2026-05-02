@@ -194,11 +194,7 @@ public class BTree {
                 throw new IllegalStateException("Nó " + p + " não existe no arquivo");
             }
 
-            i = 0;
-
-            while (i < node.getN() && key >= node.getK(i + 1)) {
-                i++;
-            }
+            i = node.findChildIndex(key);
 
             if (i >= 1 && key == node.getK(i)) {
                 return new SearchResult(p, i, true);
@@ -208,7 +204,7 @@ public class BTree {
             p = node.getA(i);
         }
 
-        return new SearchResult(q, i, false);
+        return new SearchResult(q, i+1, false);
     }
 
     public boolean nodeExists(int id) {
