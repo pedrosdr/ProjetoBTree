@@ -3,12 +3,12 @@ package entities;
 public class SearchResult {
     private int p;
     private int i;
-    private boolean j;
+    private boolean found;
 
-    public SearchResult(int p, int i, boolean j) {
+    public SearchResult(int p, int i, boolean found) {
         this.p = p;
         this.i = i;
-        this.j = j;
+        this.found = found;
     }
 
     public int getI() {
@@ -27,12 +27,12 @@ public class SearchResult {
         this.p = p;
     }
 
-    public boolean getJ() {
-        return j;
+    public boolean getFound() {
+        return found;
     }
 
-    public void setJ(boolean j) {
-        this.j = j;
+    public void setFound(boolean found) {
+        this.found = found;
     }
 
     @Override
@@ -40,7 +40,7 @@ public class SearchResult {
         return "SearchResult{" +
                 "p=" + p +
                 ", i=" + i +
-                ", j=" + j +
+                ", j=" + found +
                 '}';
     }
 }

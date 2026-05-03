@@ -13,8 +13,8 @@ public class Node {
 
         this.m = m;
         this.n = 0;
-        this.A = new int[m];
-        this.K = new int[m - 1];
+        this.A = new int[m+1];
+        this.K = new int[m];
 
         this.A[0] = 0;
     }
@@ -53,7 +53,7 @@ public class Node {
     }
 
     private void addKAPair(int i, int key, int address) {
-        if (n >= m - 1) {
+        if (n >= m) {
             throw new IllegalStateException("Nó cheio");
         }
 
