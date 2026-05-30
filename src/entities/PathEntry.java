@@ -16,4 +16,9 @@ public class PathEntry {
     public Node getNode() {
         return node;
     }
+
+    @Override
+    public String toString() {
+        return "PathEntry{" + getId() + ", " + getNode() + "}";
+    }
 }

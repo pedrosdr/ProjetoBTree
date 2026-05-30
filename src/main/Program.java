@@ -53,12 +53,10 @@ public class Program {
         btree.writeNode(7, g);
 
         btree = BTree.fromFile("data.bin");
-        System.out.println(btree.dump());
-        btree.insert(37);
-        btree.insert(5);
-        btree.insert(18);
-        btree.insert(12);
-        System.out.println(btree.dump());
         System.out.println(btree.plot());
+        btree.remove(40);
+        btree.remove(50);
+        System.out.println(btree.plot());
+
     }
 }

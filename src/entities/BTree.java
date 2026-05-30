@@ -453,4 +453,190 @@ public class BTree {
 
         return sb.toString();
     }
+
+    public void remove(int key) {
+        try (RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
+            remove(raf, key);
+        } catch (IOException ex) {
+            throw new RuntimeException("Erro ao remover chave " + key, ex);
+        }
+    }
+
+    private void remove(RandomAccessFile raf, int key) throws IOException {
+        if (root == 0) {
+            return;
+        }
+
+        Stack<PathEntry> path = new Stack<>();
+        SearchResult result = search(raf, key, path);
+
+        if (!result.getFound()) {
+            return;
+        }
+
+        int pId = result.getP();
+        int i = result.getI();
+        Node p = readNode(raf, pId);
+
+        if (p == null) {
+            throw new IllegalStateException("Nó " + pId + " não existe no arquivo");
+        }
+
+        // Caso 1: a chave está em nó interno.
+        // Substitui pela menor chave da subárvore direita.
+        if (!p.isLeaf()) {
+            int successorId = p.getA(i);
+            Node successor = readNode(raf, successorId);
+
+            if (successor == null) {
+                throw new IllegalStateException("Nó sucessor " + successorId + " não existe no arquivo");
+            }
+
+            while (!successor.isLeaf()) {
+                path.push(new PathEntry(successorId, successor));
+
+                successorId = successor.getA(0);
+                successor = readNode(raf, successorId);
+
+                if (successor == null) {
+                    throw new IllegalStateException("Nó sucessor " + successorId + " não existe no arquivo");
+                }
+            }
+
+            path.push(new PathEntry(successorId, successor));
+
+            int successorKey = successor.getK(1);
+
+            p.replaceKey(i, successorKey);
+            writeNode(raf, pId, p);
+
+            pId = successorId;
+            i = 1;
+            p = successor;
+        }
+
+        // A remoção física sempre acontece em uma folha.
+        p.removeKAPairAt(i);
+
+        fixAfterRemove(raf, path, pId, p);
+    }
+
+    private void fixAfterRemove(RandomAccessFile raf, Stack<PathEntry> path, int pId, Node p) throws IOException {
+        while (true) {
+            // A raiz é caso especial: ela pode ficar com 0 chaves.
+            if (pId == root) {
+                if (p.getN() == 0) {
+                    if (p.isLeaf()) {
+                        root = 0;
+                        maxRecords = 0;
+                        raf.setLength(HEADER_SIZE);
+                    } else {
+                        root = p.getA(0);
+                    }
+
+                    writeHeader(raf);
+                } else {
+                    writeNode(raf, pId, p);
+                }
+
+                return;
+            }
+
+            // Se o nó não ficou abaixo do mínimo, grava em disco.
+            if (p.hasMinimumKeys()) {
+                writeNode(raf, pId, p);
+                return;
+            }
+
+            if (path.isEmpty() || path.peek().getId() != pId) {
+                throw new IllegalStateException("Caminho inválido durante a remoção");
+            }
+
+            path.pop();
+
+            if (path.isEmpty()) {
+                throw new IllegalStateException("Nó não raiz sem pai durante a remoção");
+            }
+
+            int parentId = path.peek().getId();
+            Node parent = readNode(raf, parentId);
+
+            if (parent == null) {
+                throw new IllegalStateException("Nó pai " + parentId + " não existe no arquivo");
+            }
+
+            int childIndex = parent.findChildAddressIndex(pId);
+
+            // 1) Tenta redistribuir com o irmão direito.
+            if (childIndex < parent.getN()) {
+                int rightId = parent.getA(childIndex + 1);
+                Node right = readNode(raf, rightId);
+
+                if (right == null) {
+                    throw new IllegalStateException("Irmão direito " + rightId + " não existe no arquivo");
+                }
+
+                if (right.canLend()) {
+                    p.borrowFromRight(parent, childIndex + 1, right);
+
+                    writeNode(raf, pId, p);
+                    writeNode(raf, parentId, parent);
+                    writeNode(raf, rightId, right);
+
+                    return;
+                }
+            }
+
+            // 2) Tenta redistribuir com o irmão esquerdo.
+            if (childIndex > 0) {
+                int leftId = parent.getA(childIndex - 1);
+                Node left = readNode(raf, leftId);
+
+                if (left == null) {
+                    throw new IllegalStateException("Irmão esquerdo " + leftId + " não existe no arquivo");
+                }
+
+                if (left.canLend()) {
+                    p.borrowFromLeft(parent, childIndex, left);
+
+                    writeNode(raf, leftId, left);
+                    writeNode(raf, parentId, parent);
+                    writeNode(raf, pId, p);
+
+                    return;
+                }
+            }
+
+            // 3) Se nenhum irmão pode emprestar, faz fusão.
+            if (childIndex < parent.getN()) {
+                int rightId = parent.getA(childIndex + 1);
+                Node right = readNode(raf, rightId);
+
+                if (right == null) {
+                    throw new IllegalStateException("Irmão direito " + rightId + " não existe no arquivo");
+                }
+
+                p.mergeWithRight(parent.getK(childIndex + 1), right);
+                parent.removeKAPairAt(childIndex + 1);
+
+                writeNode(raf, pId, p);
+            } else {
+                int leftId = parent.getA(childIndex - 1);
+                Node left = readNode(raf, leftId);
+
+                if (left == null) {
+                    throw new IllegalStateException("Irmão esquerdo " + leftId + " não existe no arquivo");
+                }
+
+                left.mergeWithRight(parent.getK(childIndex), p);
+                parent.removeKAPairAt(childIndex);
+
+                writeNode(raf, leftId, left);
+            }
+
+            // Após a fusão, quem pode ter ficado abaixo do mínimo é o pai.
+            pId = parentId;
+            p = parent;
+        }
+    }
 }
