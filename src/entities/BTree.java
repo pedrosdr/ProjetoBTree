@@ -12,6 +12,7 @@ public class BTree {
 
     private int root;
     private int maxRecords;
+    private int freeStack;
 
     private BTree(String filePath, int m) {
         if (filePath == null || filePath.isBlank()) {
@@ -31,6 +32,7 @@ public class BTree {
 
         btree.root = 0;
         btree.maxRecords = 0;
+        btree.freeStack = 0;
         btree.initializeFile();
 
         return btree;
@@ -41,15 +43,21 @@ public class BTree {
             int root = raf.readInt();
             int m = raf.readInt();
             int maxRecords = raf.readInt();
+            int freeStack = raf.readInt();
 
             BTree btree = new BTree(filePath, m);
             btree.root = root;
             btree.maxRecords = maxRecords;
+            btree.freeStack = freeStack;
 
             return btree;
         } catch (IOException ex) {
             throw new RuntimeException("Erro ao carregar arquivo da BTree", ex);
         }
+    }
+
+    public int getFreeStack() {
+        return freeStack;
     }
 
     public String getFilePath() {
@@ -82,6 +90,7 @@ public class BTree {
         raf.writeInt(root);
         raf.writeInt(m);
         raf.writeInt(maxRecords);
+        raf.writeInt(freeStack);
     }
 
     private int nodeSize() {
@@ -98,9 +107,37 @@ public class BTree {
         return HEADER_SIZE + (long) (id - 1) * nodeSize();
     }
 
-    private int nextNodeId() {
+    private int nextNodeId(RandomAccessFile raf) throws IOException {
+        if (freeStack != 0) {
+            int id = freeStack;
+            raf.seek(nodePosition(id));
+            freeStack = raf.readInt();
+
+            writeHeader(raf);
+
+            return id;
+        }
+
         maxRecords++;
+        writeHeader(raf);
+
         return maxRecords;
+    }
+
+    private void releaseNode(RandomAccessFile raf, int id) throws IOException {
+        if (id <= 0 || id > maxRecords) {
+            throw new IllegalArgumentException("id inválido para liberação: " + id);
+        }
+
+        raf.seek(nodePosition(id));
+
+        // No registro livre, o primeiro int deixa de ser n
+        // e passa a apontar para o próximo registro livre.
+        raf.writeInt(freeStack);
+
+        freeStack = id;
+
+        writeHeader(raf);
     }
 
     public void writeNode(int id, Node node) {
@@ -261,7 +298,7 @@ public class BTree {
             p.setA0(0);
             p.addKAPair(key, 0);
 
-            int pId = nextNodeId();
+            int pId = nextNodeId(raf);
             root = pId;
 
             writeNode(raf, pId, p);
@@ -304,7 +341,7 @@ public class BTree {
             p = split.getP();
             Node q = split.getQ();
 
-            int qId = nextNodeId();
+            int qId = nextNodeId(raf);
             allocatedNewNode = true;
 
             writeNode(raf, pId, p);
@@ -319,7 +356,7 @@ public class BTree {
         newRoot.setA0(promotedPAddress);
         newRoot.addKAPair(promotedKey, promotedAddress);
 
-        int newRootId = nextNodeId();
+        int newRootId = nextNodeId(raf);
         root = newRootId;
 
         writeNode(raf, newRootId, newRoot);
@@ -357,6 +394,7 @@ public class BTree {
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
             root = 0;
             maxRecords = 0;
+            freeStack = 0;
 
             raf.setLength(HEADER_SIZE);
             writeHeader(raf);
@@ -373,12 +411,10 @@ public class BTree {
             sb.append(String.format("%-5s %s\n", "ID", "NODE"));
             sb.append("-----------------------------------\n");
 
-            for (int id = 1; id <= maxRecords; id++) {
-                Node node = readNode(raf, id);
-
-                if (node != null) {
-                    sb.append(String.format("%-5d %s\n", id, node));
-                }
+            if (root == 0) {
+                sb.append("(árvore vazia)\n");
+            } else {
+                dumpNode(raf, root, sb, new java.util.HashSet<>());
             }
 
             sb.append("-----------------------------------");
@@ -386,6 +422,35 @@ public class BTree {
             return sb.toString();
         } catch (IOException ex) {
             throw new RuntimeException("Erro ao gerar dump da BTree", ex);
+        }
+    }
+
+    private void dumpNode(
+            RandomAccessFile raf,
+            int nodeId,
+            StringBuilder sb,
+            java.util.Set<Integer> visited
+    ) throws IOException {
+        if (nodeId == 0) {
+            return;
+        }
+
+        if (!visited.add(nodeId)) {
+            sb.append(String.format("%-5d %s\n", nodeId, "<referência repetida>"));
+            return;
+        }
+
+        Node node = readNode(raf, nodeId);
+
+        if (node == null) {
+            sb.append(String.format("%-5d %s\n", nodeId, "<nó não encontrado>"));
+            return;
+        }
+
+        sb.append(String.format("%-5d %s\n", nodeId, node));
+
+        for (int i = 0; i <= node.getN(); i++) {
+            dumpNode(raf, node.getA(i), sb, visited);
         }
     }
 
@@ -529,12 +594,16 @@ public class BTree {
                     if (p.isLeaf()) {
                         root = 0;
                         maxRecords = 0;
-                        raf.setLength(HEADER_SIZE);
-                    } else {
-                        root = p.getA(0);
-                    }
+                        freeStack = 0;
 
-                    writeHeader(raf);
+                        raf.setLength(HEADER_SIZE);
+                        writeHeader(raf);
+                    } else {
+
+                        root = p.getA(0);
+
+                        releaseNode(raf, pId);
+                    }
                 } else {
                     writeNode(raf, pId, p);
                 }
@@ -620,6 +689,7 @@ public class BTree {
                 parent.removeKAPairAt(childIndex + 1);
 
                 writeNode(raf, pId, p);
+                releaseNode(raf, rightId);
             } else {
                 int leftId = parent.getA(childIndex - 1);
                 Node left = readNode(raf, leftId);
@@ -632,6 +702,7 @@ public class BTree {
                 parent.removeKAPairAt(childIndex);
 
                 writeNode(raf, leftId, left);
+                releaseNode(raf, pId);
             }
 
             // Após a fusão, quem pode ter ficado abaixo do mínimo é o pai.
