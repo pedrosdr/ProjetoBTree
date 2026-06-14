@@ -5,8 +5,6 @@ import java.io.RandomAccessFile;
 import java.util.Stack;
 
 public class BTree {
-    private static final int HEADER_SIZE = 128;
-
     private final String filePath;
     private final int m;
 
@@ -78,7 +76,7 @@ public class BTree {
 
     private void initializeFile() {
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
-            raf.setLength(HEADER_SIZE);
+            raf.setLength(headerSize());
             writeHeader(raf);
         } catch (IOException ex) {
             throw new RuntimeException("Erro ao inicializar arquivo da BTree", ex);
@@ -99,12 +97,16 @@ public class BTree {
                 + Integer.BYTES * (m - 1);
     }
 
+    private int headerSize() {
+        return nodeSize();
+    }
+
     private long nodePosition(int id) {
         if (id <= 0) {
             throw new IllegalArgumentException("id deve ser maior que zero");
         }
 
-        return HEADER_SIZE + (long) (id - 1) * nodeSize();
+        return headerSize() + (long) (id - 1) * nodeSize();
     }
 
     private int nextNodeId(RandomAccessFile raf) throws IOException {
@@ -396,7 +398,7 @@ public class BTree {
             maxRecords = 0;
             freeStack = 0;
 
-            raf.setLength(HEADER_SIZE);
+            raf.setLength(headerSize());
             writeHeader(raf);
         } catch (IOException ex) {
             throw new RuntimeException("Erro ao limpar arquivo da BTree", ex);
@@ -596,7 +598,7 @@ public class BTree {
                         maxRecords = 0;
                         freeStack = 0;
 
-                        raf.setLength(HEADER_SIZE);
+                        raf.setLength(headerSize());
                         writeHeader(raf);
                     } else {
 

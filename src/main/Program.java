@@ -8,7 +8,7 @@ import java.util.Stack;
 
 public class Program {
     public static void main(String[] args) {
-        BTree btree = BTree.createNew("data.bin", 3);
+        BTree btree = BTree.createNew("btree.bin", 3);
 
         int[] keys = {
                 50, 30, 60, 70, 10, 40, 55, 65, 75, 80, 58
