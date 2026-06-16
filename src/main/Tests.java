@@ -1,6 +1,7 @@
 package main;
 
 import entities.BTree;
+import entities.DiskAccessCounter;
 import entities.MainFile;
 import entities.Record;
 
@@ -227,5 +228,155 @@ public class Tests {
         }
 
         System.out.println("\nTeste passou: MainFile e BTree reutilizaram memória até freeStack = 0.");
+    }
+
+    public static void diskAccess() {
+        BTree btree = BTree.createNew("index-access-test.bin", "main-access-test.bin", 3);
+
+        DiskAccessCounter counter = btree.getDiskAccessCounter();
+
+// Não contar criação/inicialização dos arquivos.
+        counter.reset();
+
+        System.out.println("=== TESTE DE ACESSOS A DISCO ===");
+
+        System.out.println("\n--- Inserindo registros ---");
+
+        btree.insertRecord(new Record(50, "Pessoa 50", (short) 50));
+        btree.insertRecord(new Record(30, "Pessoa 30", (short) 30));
+        btree.insertRecord(new Record(60, "Pessoa 60", (short) 60));
+        btree.insertRecord(new Record(70, "Pessoa 70", (short) 70));
+        btree.insertRecord(new Record(10, "Pessoa 10", (short) 10));
+        btree.insertRecord(new Record(40, "Pessoa 40", (short) 40));
+        btree.insertRecord(new Record(55, "Pessoa 55", (short) 55));
+        btree.insertRecord(new Record(65, "Pessoa 65", (short) 65));
+        btree.insertRecord(new Record(75, "Pessoa 75", (short) 75));
+        btree.insertRecord(new Record(80, "Pessoa 80", (short) 80));
+
+        System.out.println("Após inserções:");
+        System.out.println(counter.report());
+
+        long readsAfterInsert = counter.getTotalReads();
+        long writesAfterInsert = counter.getTotalWrites();
+        long totalAfterInsert = counter.getTotal();
+
+        if (totalAfterInsert <= 0) {
+            throw new AssertionError("Falha: inserções deveriam gerar acessos a disco.");
+        }
+
+        if (counter.getBtreeTotal() <= 0) {
+            throw new AssertionError("Falha: inserções deveriam acessar a BTree.");
+        }
+
+        if (counter.getMainFileTotal() <= 0) {
+            throw new AssertionError("Falha: inserções deveriam acessar o MainFile.");
+        }
+
+        System.out.println("\n--- Buscando registros existentes e inexistentes ---");
+
+        counter.reset();
+
+        Record r50 = btree.searchRecord(50);
+        Record r75 = btree.searchRecord(75);
+        Record r999 = btree.searchRecord(999);
+
+        System.out.println("Resultado busca 50 = " + r50);
+        System.out.println("Resultado busca 75 = " + r75);
+        System.out.println("Resultado busca 999 = " + r999);
+
+        System.out.println("\nApós buscas:");
+        System.out.println(counter.report());
+
+        if (r50 == null) {
+            throw new AssertionError("Falha: chave 50 deveria existir.");
+        }
+
+        if (r75 == null) {
+            throw new AssertionError("Falha: chave 75 deveria existir.");
+        }
+
+        if (r999 != null) {
+            throw new AssertionError("Falha: chave 999 não deveria existir.");
+        }
+
+        if (counter.getBtreeReads() <= 0) {
+            throw new AssertionError("Falha: busca deveria ler nós da BTree.");
+        }
+
+        if (counter.getBtreeWrites() != 0) {
+            throw new AssertionError("Falha: busca não deveria escrever na BTree.");
+        }
+
+        if (counter.getMainFileReads() <= 0) {
+            throw new AssertionError("Falha: busca de chaves existentes deveria ler registros do MainFile.");
+        }
+
+        if (counter.getMainFileWrites() != 0) {
+            throw new AssertionError("Falha: busca não deveria escrever no MainFile.");
+        }
+
+        System.out.println("\n--- Removendo registros ---");
+
+        counter.reset();
+
+        boolean removed30 = btree.removeRecord(30);
+        boolean removed60 = btree.removeRecord(60);
+        boolean removed999 = btree.removeRecord(999);
+
+        System.out.println("remove 30 = " + removed30);
+        System.out.println("remove 60 = " + removed60);
+        System.out.println("remove 999 = " + removed999);
+
+        System.out.println("\nApós remoções:");
+        System.out.println(counter.report());
+
+        if (!removed30) {
+            throw new AssertionError("Falha: chave 30 deveria ser removida.");
+        }
+
+        if (!removed60) {
+            throw new AssertionError("Falha: chave 60 deveria ser removida.");
+        }
+
+        if (removed999) {
+            throw new AssertionError("Falha: chave 999 não deveria ser removida.");
+        }
+
+        if (counter.getBtreeReads() <= 0) {
+            throw new AssertionError("Falha: remoção deveria ler a BTree.");
+        }
+
+        if (counter.getBtreeWrites() <= 0) {
+            throw new AssertionError("Falha: remoção deveria escrever na BTree.");
+        }
+
+        if (counter.getMainFileWrites() <= 0) {
+            throw new AssertionError("Falha: remoção deveria liberar registros no MainFile.");
+        }
+
+        System.out.println("\n--- Testando reuso de memória com contagem ---");
+
+        counter.reset();
+
+        btree.insertRecord(new Record(35, "Pessoa 35", (short) 35));
+        btree.insertRecord(new Record(62, "Pessoa 62", (short) 62));
+
+        System.out.println("Após inserir 35 e 62:");
+        System.out.println(counter.report());
+
+        if (counter.getMainFileReads() <= 0) {
+            throw new AssertionError("Falha: reuso no MainFile deveria ler a freeStack.");
+        }
+
+        if (counter.getMainFileWrites() <= 0) {
+            throw new AssertionError("Falha: reuso no MainFile deveria escrever header/registro.");
+        }
+
+        System.out.println("\n=== RESUMO DOS ACESSOS NAS INSERÇÕES INICIAIS ===");
+        System.out.println("Total reads após inserções = " + readsAfterInsert);
+        System.out.println("Total writes após inserções = " + writesAfterInsert);
+        System.out.println("Total accesses após inserções = " + totalAfterInsert);
+
+        System.out.println("\nTeste passou: acessos a disco foram contabilizados em BTree e MainFile.");
     }
 }

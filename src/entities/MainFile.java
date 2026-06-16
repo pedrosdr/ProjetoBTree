@@ -10,12 +10,23 @@ public class MainFile {
     private int maxRecords;
     private int freeStack;
 
+    private DiskAccessCounter diskAccessCounter;
+
     public MainFile(String filePath) {
+        this(filePath, null);
+    }
+
+    public MainFile(String filePath, DiskAccessCounter diskAccessCounter) {
         if (filePath == null || filePath.isBlank()) {
             throw new IllegalArgumentException("filePath não pode ser null");
         }
 
         this.filePath = filePath;
+        this.diskAccessCounter = diskAccessCounter;
+    }
+
+    public void setDiskAccessCounter(DiskAccessCounter diskAccessCounter) {
+        this.diskAccessCounter = diskAccessCounter;
     }
 
     public String getFilePath() {
@@ -38,12 +49,31 @@ public class MainFile {
         return recordSize();
     }
 
+    private void countRead() {
+        if (diskAccessCounter != null) {
+            diskAccessCounter.countMainFileRead();
+        }
+    }
+
+    private void countWrite() {
+        if (diskAccessCounter != null) {
+            diskAccessCounter.countMainFileWrite();
+        }
+    }
+
     public static MainFile fromFile(String filePath) {
+        return fromFile(filePath, null);
+    }
+
+    public static MainFile fromFile(String filePath, DiskAccessCounter diskAccessCounter) {
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "r")) {
+            MainFile file = new MainFile(filePath, diskAccessCounter);
+
+            countMainFileHeaderRead(file);
+
             int maxRecords = raf.readInt();
             int freeStack = raf.readInt();
 
-            MainFile file = new MainFile(filePath);
             file.maxRecords = maxRecords;
             file.freeStack = freeStack;
 
@@ -53,8 +83,16 @@ public class MainFile {
         }
     }
 
+    private static void countMainFileHeaderRead(MainFile file) {
+        file.countRead();
+    }
+
     public static MainFile createNew(String filePath) {
-        MainFile file = new MainFile(filePath);
+        return createNew(filePath, null);
+    }
+
+    public static MainFile createNew(String filePath, DiskAccessCounter diskAccessCounter) {
+        MainFile file = new MainFile(filePath, diskAccessCounter);
 
         file.maxRecords = 0;
         file.freeStack = 0;
@@ -65,7 +103,9 @@ public class MainFile {
 
     public void initializeFile() {
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
+            countWrite();
             raf.setLength(headerSize());
+
             writeHeader(raf);
         } catch (IOException ex) {
             throw new RuntimeException("Erro ao inicializar arquivo principal", ex);
@@ -77,7 +117,9 @@ public class MainFile {
             maxRecords = 0;
             freeStack = 0;
 
+            countWrite();
             raf.setLength(headerSize());
+
             writeHeader(raf);
         } catch (IOException ex) {
             throw new RuntimeException("Erro ao limpar arquivo principal", ex);
@@ -86,6 +128,9 @@ public class MainFile {
 
     public void writeHeader(RandomAccessFile raf) throws IOException {
         raf.seek(0);
+
+        countWrite();
+
         raf.writeInt(maxRecords);
         raf.writeInt(freeStack);
     }
@@ -103,6 +148,9 @@ public class MainFile {
             int id = freeStack;
 
             raf.seek(recordPosition(id));
+
+            countRead();
+
             freeStack = raf.readInt();
 
             writeHeader(raf);
@@ -139,6 +187,8 @@ public class MainFile {
     private void writeRecord(RandomAccessFile raf, Record record, int id) throws IOException {
         raf.seek(recordPosition(id));
 
+        countWrite();
+
         raf.writeInt(record.getKey());
         writeFixedString(raf, record.getName(), NAME_SIZE);
         raf.writeShort(record.getAge());
@@ -158,6 +208,8 @@ public class MainFile {
 
     private Record readRecord(RandomAccessFile raf, int id) throws IOException {
         raf.seek(recordPosition(id));
+
+        countRead();
 
         int key = raf.readInt();
         String name = readFixedString(raf, NAME_SIZE);
@@ -181,9 +233,8 @@ public class MainFile {
 
         raf.seek(recordPosition(id));
 
-        // Registro livre:
-        // o primeiro int deixa de ser key
-        // e passa a apontar para o próximo registro livre.
+        countWrite();
+
         raf.writeInt(freeStack);
 
         freeStack = id;

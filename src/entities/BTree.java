@@ -15,6 +15,7 @@ public class BTree {
     private int freeStack;
 
     private MainFile mainFile;
+    private final DiskAccessCounter diskAccessCounter;
 
     private BTree(String filePath, int m) {
         if (filePath == null || filePath.isBlank()) {
@@ -27,6 +28,7 @@ public class BTree {
 
         this.filePath = filePath;
         this.m = m;
+        this.diskAccessCounter = new DiskAccessCounter();
     }
 
     public static BTree createNew(String filePath, int m) {
@@ -47,7 +49,7 @@ public class BTree {
         btree.root = 0;
         btree.maxRecords = 0;
         btree.freeStack = 0;
-        btree.mainFile = MainFile.createNew(mainFilePath);
+        btree.mainFile = MainFile.createNew(mainFilePath, btree.diskAccessCounter);
         btree.initializeFile();
 
         return btree;
@@ -61,6 +63,8 @@ public class BTree {
             int freeStack = raf.readInt();
 
             BTree btree = new BTree(filePath, m);
+            btree.countRead();
+
             btree.root = root;
             btree.maxRecords = maxRecords;
             btree.freeStack = freeStack;
@@ -80,10 +84,12 @@ public class BTree {
             int freeStack = raf.readInt();
 
             BTree btree = new BTree(indexFilePath, m);
+            btree.countRead();
+
             btree.root = root;
             btree.maxRecords = maxRecords;
             btree.freeStack = freeStack;
-            btree.mainFile = MainFile.fromFile(mainFilePath);
+            btree.mainFile = MainFile.fromFile(mainFilePath, btree.diskAccessCounter);
 
             return btree;
         } catch (IOException ex) {
@@ -96,6 +102,7 @@ public class BTree {
             throw new IllegalArgumentException("mainFile não pode ser null");
         }
 
+        mainFile.setDiskAccessCounter(diskAccessCounter);
         this.mainFile = mainFile;
     }
 
@@ -109,6 +116,10 @@ public class BTree {
 
     public MainFile getMainFile() {
         return mainFile;
+    }
+
+    public DiskAccessCounter getDiskAccessCounter() {
+        return diskAccessCounter;
     }
 
     public int getFreeStack() {
@@ -131,9 +142,19 @@ public class BTree {
         return maxRecords;
     }
 
+    private void countRead() {
+        diskAccessCounter.countBTreeRead();
+    }
+
+    private void countWrite() {
+        diskAccessCounter.countBTreeWrite();
+    }
+
     private void initializeFile() {
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
+            countWrite();
             raf.setLength(headerSize());
+
             writeHeader(raf);
         } catch (IOException ex) {
             throw new RuntimeException("Erro ao inicializar arquivo da BTree", ex);
@@ -142,6 +163,9 @@ public class BTree {
 
     private void writeHeader(RandomAccessFile raf) throws IOException {
         raf.seek(0);
+
+        countWrite();
+
         raf.writeInt(root);
         raf.writeInt(m);
         raf.writeInt(maxRecords);
@@ -172,6 +196,9 @@ public class BTree {
             int id = freeStack;
 
             raf.seek(nodePosition(id));
+
+            countRead();
+
             freeStack = raf.readInt();
 
             writeHeader(raf);
@@ -191,6 +218,8 @@ public class BTree {
         }
 
         raf.seek(nodePosition(id));
+
+        countWrite();
 
         raf.writeInt(freeStack);
 
@@ -238,6 +267,8 @@ public class BTree {
 
         raf.seek(nodePosition(id));
 
+        countWrite();
+
         raf.writeInt(node.getN());
 
         for (int i = 0; i < m; i++) {
@@ -281,6 +312,8 @@ public class BTree {
         }
 
         raf.seek(position);
+
+        countRead();
 
         int n = raf.readInt();
 
@@ -518,7 +551,9 @@ public class BTree {
             maxRecords = 0;
             freeStack = 0;
 
+            countWrite();
             raf.setLength(headerSize());
+
             writeHeader(raf);
         } catch (IOException ex) {
             throw new RuntimeException("Erro ao limpar arquivo da BTree", ex);
@@ -732,7 +767,9 @@ public class BTree {
                         maxRecords = 0;
                         freeStack = 0;
 
+                        countWrite();
                         raf.setLength(headerSize());
+
                         writeHeader(raf);
                     } else {
                         root = p.getA(0);
