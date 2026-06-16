@@ -3,18 +3,23 @@ package entities;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 
-public class MainFile
-{
+public class MainFile {
+    private static final int NAME_SIZE = 80;
+
     private final String filePath;
     private int maxRecords;
     private int freeStack;
 
     public MainFile(String filePath) {
         if (filePath == null || filePath.isBlank()) {
-            throw new IllegalArgumentException("filePath não pode ser vazio");
+            throw new IllegalArgumentException("filePath não pode ser null");
         }
 
         this.filePath = filePath;
+    }
+
+    public String getFilePath() {
+        return filePath;
     }
 
     public int getMaxRecords() {
@@ -26,7 +31,7 @@ public class MainFile
     }
 
     public int recordSize() {
-        return Integer.BYTES + Character.BYTES * 80 + Short.BYTES;
+        return Integer.BYTES + Character.BYTES * NAME_SIZE + Short.BYTES;
     }
 
     public int headerSize() {
@@ -34,7 +39,7 @@ public class MainFile
     }
 
     public static MainFile fromFile(String filePath) {
-        try(RandomAccessFile raf = new RandomAccessFile(filePath, "r")) {
+        try (RandomAccessFile raf = new RandomAccessFile(filePath, "r")) {
             int maxRecords = raf.readInt();
             int freeStack = raf.readInt();
 
@@ -59,11 +64,23 @@ public class MainFile
     }
 
     public void initializeFile() {
-        try(RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
+        try (RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
             raf.setLength(headerSize());
             writeHeader(raf);
         } catch (IOException ex) {
             throw new RuntimeException("Erro ao inicializar arquivo principal", ex);
+        }
+    }
+
+    public void clear() {
+        try (RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
+            maxRecords = 0;
+            freeStack = 0;
+
+            raf.setLength(headerSize());
+            writeHeader(raf);
+        } catch (IOException ex) {
+            throw new RuntimeException("Erro ao limpar arquivo principal", ex);
         }
     }
 
@@ -74,16 +91,17 @@ public class MainFile
     }
 
     private long recordPosition(int recordId) {
-        if(recordId <= 0) {
+        if (recordId <= 0) {
             throw new IllegalArgumentException("recordId deve ser maior que zero");
         }
 
-        return (long) headerSize() + (long) (recordId - 1) * (long) recordSize();
+        return (long) headerSize() + (long) (recordId - 1) * recordSize();
     }
 
-    private int nextRecordId(RandomAccessFile raf) throws IOException{
+    private int nextRecordId(RandomAccessFile raf) throws IOException {
         if (freeStack != 0) {
             int id = freeStack;
+
             raf.seek(recordPosition(id));
             freeStack = raf.readInt();
 
@@ -91,13 +109,14 @@ public class MainFile
 
             return id;
         }
+
         maxRecords++;
         writeHeader(raf);
 
         return maxRecords;
     }
 
-    public int writeRecord(Record record) {
+    public int insertRecord(Record record) {
         if (record == null) {
             throw new IllegalArgumentException("record não pode ser null");
         }
@@ -113,16 +132,20 @@ public class MainFile
         }
     }
 
+    public int writeRecord(Record record) {
+        return insertRecord(record);
+    }
+
     private void writeRecord(RandomAccessFile raf, Record record, int id) throws IOException {
         raf.seek(recordPosition(id));
 
         raf.writeInt(record.getKey());
-        writeFixedString(raf, record.getName(), 80);
+        writeFixedString(raf, record.getName(), NAME_SIZE);
         raf.writeShort(record.getAge());
     }
 
     public Record readRecord(int id) {
-        if (id <= 0 || id > maxRecords) {
+        if (!recordExists(id)) {
             return null;
         }
 
@@ -137,10 +160,38 @@ public class MainFile
         raf.seek(recordPosition(id));
 
         int key = raf.readInt();
-        String name = readFixedString(raf, 80);
+        String name = readFixedString(raf, NAME_SIZE);
         short age = raf.readShort();
 
         return new Record(key, name, age);
+    }
+
+    public void removeRecord(int id) {
+        try (RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
+            releaseRecord(raf, id);
+        } catch (IOException ex) {
+            throw new RuntimeException("Erro ao remover registro do arquivo principal", ex);
+        }
+    }
+
+    private void releaseRecord(RandomAccessFile raf, int id) throws IOException {
+        if (!recordExists(id)) {
+            throw new IllegalArgumentException("id inválido: " + id);
+        }
+
+        raf.seek(recordPosition(id));
+
+        // Registro livre:
+        // o primeiro int deixa de ser key
+        // e passa a apontar para o próximo registro livre.
+        raf.writeInt(freeStack);
+
+        freeStack = id;
+        writeHeader(raf);
+    }
+
+    public boolean recordExists(int id) {
+        return id > 0 && id <= maxRecords;
     }
 
     private void writeFixedString(RandomAccessFile raf, String value, int size) throws IOException {
@@ -160,7 +211,7 @@ public class MainFile
     private String readFixedString(RandomAccessFile raf, int size) throws IOException {
         StringBuilder sb = new StringBuilder();
 
-        for(int i = 0; i < size; i++) {
+        for (int i = 0; i < size; i++) {
             char c = raf.readChar();
 
             if (c != '\0') {

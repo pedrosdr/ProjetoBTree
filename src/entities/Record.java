@@ -35,7 +35,7 @@ public class Record
     @Override
     public String toString() {
         return "Record{" +
-                "id=" + key +
+                "key=" + key +
                 ", name='" + name + '\'' +
                 ", age=" + age +
                 '}';
