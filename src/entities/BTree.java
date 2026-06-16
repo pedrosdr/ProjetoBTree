@@ -2,6 +2,8 @@ package entities;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.Stack;
 
 public class BTree {
@@ -12,13 +14,15 @@ public class BTree {
     private int maxRecords;
     private int freeStack;
 
+    private MainFile mainFile;
+
     private BTree(String filePath, int m) {
         if (filePath == null || filePath.isBlank()) {
             throw new IllegalArgumentException("filePath não pode ser vazio");
         }
 
-        if (m < 2) {
-            throw new IllegalArgumentException("m deve ser pelo menos 2");
+        if (m < 3) {
+            throw new IllegalArgumentException("m deve ser pelo menos 3");
         }
 
         this.filePath = filePath;
@@ -31,6 +35,19 @@ public class BTree {
         btree.root = 0;
         btree.maxRecords = 0;
         btree.freeStack = 0;
+        btree.mainFile = null;
+        btree.initializeFile();
+
+        return btree;
+    }
+
+    public static BTree createNew(String indexFilePath, String mainFilePath, int m) {
+        BTree btree = new BTree(indexFilePath, m);
+
+        btree.root = 0;
+        btree.maxRecords = 0;
+        btree.freeStack = 0;
+        btree.mainFile = MainFile.createNew(mainFilePath);
         btree.initializeFile();
 
         return btree;
@@ -47,11 +64,51 @@ public class BTree {
             btree.root = root;
             btree.maxRecords = maxRecords;
             btree.freeStack = freeStack;
+            btree.mainFile = null;
 
             return btree;
         } catch (IOException ex) {
             throw new RuntimeException("Erro ao carregar arquivo da BTree", ex);
         }
+    }
+
+    public static BTree fromFile(String indexFilePath, String mainFilePath) {
+        try (RandomAccessFile raf = new RandomAccessFile(indexFilePath, "r")) {
+            int root = raf.readInt();
+            int m = raf.readInt();
+            int maxRecords = raf.readInt();
+            int freeStack = raf.readInt();
+
+            BTree btree = new BTree(indexFilePath, m);
+            btree.root = root;
+            btree.maxRecords = maxRecords;
+            btree.freeStack = freeStack;
+            btree.mainFile = MainFile.fromFile(mainFilePath);
+
+            return btree;
+        } catch (IOException ex) {
+            throw new RuntimeException("Erro ao carregar arquivo da BTree", ex);
+        }
+    }
+
+    public void setMainFile(MainFile mainFile) {
+        if (mainFile == null) {
+            throw new IllegalArgumentException("mainFile não pode ser null");
+        }
+
+        this.mainFile = mainFile;
+    }
+
+    private MainFile requireMainFile() {
+        if (mainFile == null) {
+            throw new IllegalStateException("Arquivo principal não foi associado à BTree");
+        }
+
+        return mainFile;
+    }
+
+    public MainFile getMainFile() {
+        return mainFile;
     }
 
     public int getFreeStack() {
@@ -94,6 +151,7 @@ public class BTree {
     private int nodeSize() {
         return Integer.BYTES
                 + Integer.BYTES * m
+                + Integer.BYTES * (m - 1)
                 + Integer.BYTES * (m - 1);
     }
 
@@ -112,6 +170,7 @@ public class BTree {
     private int nextNodeId(RandomAccessFile raf) throws IOException {
         if (freeStack != 0) {
             int id = freeStack;
+
             raf.seek(nodePosition(id));
             freeStack = raf.readInt();
 
@@ -133,8 +192,6 @@ public class BTree {
 
         raf.seek(nodePosition(id));
 
-        // No registro livre, o primeiro int deixa de ser n
-        // e passa a apontar para o próximo registro livre.
         raf.writeInt(freeStack);
 
         freeStack = id;
@@ -194,6 +251,14 @@ public class BTree {
                 raf.writeInt(0);
             }
         }
+
+        for (int i = 1; i <= m - 1; i++) {
+            if (i <= node.getN()) {
+                raf.writeInt(node.getB(i));
+            } else {
+                raf.writeInt(0);
+            }
+        }
     }
 
     public Node readNode(int id) {
@@ -235,11 +300,17 @@ public class BTree {
             keys[i] = raf.readInt();
         }
 
+        int[] recordAddresses = new int[m - 1];
+
+        for (int i = 0; i < m - 1; i++) {
+            recordAddresses[i] = raf.readInt();
+        }
+
         Node node = new Node(m);
         node.setA0(addresses[0]);
 
         for (int i = 1; i <= n; i++) {
-            node.addKAPair(keys[i - 1], addresses[i]);
+            node.addKAPair(keys[i - 1], addresses[i], recordAddresses[i - 1]);
         }
 
         return node;
@@ -276,29 +347,33 @@ public class BTree {
             i = node.findChildIndex(key);
 
             if (i >= 1 && key == node.getK(i)) {
-                return new SearchResult(p, i, true);
+                return new SearchResult(p, i, true, node.getB(i));
             }
 
             q = p;
             p = node.getA(i);
         }
 
-        return new SearchResult(q, i, false);
+        return new SearchResult(q, i, false, 0);
     }
 
     public void insert(int key) {
+        insert(key, 0);
+    }
+
+    public void insert(int key, int recordAddress) {
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
-            insert(raf, key);
+            insert(raf, key, recordAddress);
         } catch (IOException ex) {
             throw new RuntimeException("Erro ao inserir chave " + key, ex);
         }
     }
 
-    private void insert(RandomAccessFile raf, int key) throws IOException {
+    private void insert(RandomAccessFile raf, int key, int recordAddress) throws IOException {
         if (root == 0) {
             Node p = new Node(m);
             p.setA0(0);
-            p.addKAPair(key, 0);
+            p.addKAPair(key, 0, recordAddress);
 
             int pId = nextNodeId(raf);
             root = pId;
@@ -317,6 +392,7 @@ public class BTree {
 
         int promotedKey = key;
         int promotedAddress = 0;
+        int promotedRecordAddress = recordAddress;
         int promotedPAddress = 0;
         boolean allocatedNewNode = false;
 
@@ -326,7 +402,7 @@ public class BTree {
             int pId = entry.getId();
             Node p = entry.getNode();
 
-            p.addKAPair(promotedKey, promotedAddress);
+            p.addKAPair(promotedKey, promotedAddress, promotedRecordAddress);
 
             if (p.getN() <= m - 1) {
                 writeNode(raf, pId, p);
@@ -350,13 +426,14 @@ public class BTree {
             writeNode(raf, qId, q);
 
             promotedKey = split.getPromotedKey();
+            promotedRecordAddress = split.getPromotedRecordAddress();
             promotedAddress = qId;
             promotedPAddress = pId;
         }
 
         Node newRoot = new Node(m);
         newRoot.setA0(promotedPAddress);
-        newRoot.addKAPair(promotedKey, promotedAddress);
+        newRoot.addKAPair(promotedKey, promotedAddress, promotedRecordAddress);
 
         int newRootId = nextNodeId(raf);
         root = newRootId;
@@ -374,18 +451,61 @@ public class BTree {
         p.setA0(node.getA(0));
 
         for (int j = 1; j < middle; j++) {
-            p.addKAPair(node.getK(j), node.getA(j));
+            p.addKAPair(node.getK(j), node.getA(j), node.getB(j));
         }
 
         q.setA0(node.getA(middle));
 
         for (int j = middle + 1; j <= node.getN(); j++) {
-            q.addKAPair(node.getK(j), node.getA(j));
+            q.addKAPair(node.getK(j), node.getA(j), node.getB(j));
         }
 
         int promotedKey = node.getK(middle);
+        int promotedRecordAddress = node.getB(middle);
 
-        return new SplitResult(p, promotedKey, q);
+        return new SplitResult(p, promotedKey, promotedRecordAddress, q);
+    }
+
+    public boolean insertRecord(Record record) {
+        if (record == null) {
+            throw new IllegalArgumentException("record não pode ser null");
+        }
+
+        if (search(record.getKey()).getFound()) {
+            return false;
+        }
+
+        int recordAddress = requireMainFile().insertRecord(record);
+
+        insert(record.getKey(), recordAddress);
+
+        return true;
+    }
+
+    public Record searchRecord(int key) {
+        SearchResult result = search(key);
+
+        if (!result.getFound()) {
+            return null;
+        }
+
+        return requireMainFile().readRecord(result.getRecordAddress());
+    }
+
+    public boolean removeRecord(int key) {
+        SearchResult result = search(key);
+
+        if (!result.getFound()) {
+            return false;
+        }
+
+        int recordAddress = result.getRecordAddress();
+
+        remove(key);
+
+        requireMainFile().removeRecord(recordAddress);
+
+        return true;
     }
 
     public boolean nodeExists(int id) {
@@ -403,6 +523,10 @@ public class BTree {
         } catch (IOException ex) {
             throw new RuntimeException("Erro ao limpar arquivo da BTree", ex);
         }
+
+        if (mainFile != null) {
+            mainFile.clear();
+        }
     }
 
     public String dump() {
@@ -416,7 +540,7 @@ public class BTree {
             if (root == 0) {
                 sb.append("(árvore vazia)\n");
             } else {
-                dumpNode(raf, root, sb, new java.util.HashSet<>());
+                dumpNode(raf, root, sb, new HashSet<>());
             }
 
             sb.append("-----------------------------------");
@@ -431,7 +555,7 @@ public class BTree {
             RandomAccessFile raf,
             int nodeId,
             StringBuilder sb,
-            java.util.Set<Integer> visited
+            Set<Integer> visited
     ) throws IOException {
         if (nodeId == 0) {
             return;
@@ -465,7 +589,7 @@ public class BTree {
             if (root == 0) {
                 sb.append("(árvore vazia)\n");
             } else {
-                plotNode(raf, root, 0, sb);
+                plotNode(raf, root, 0, sb, new HashSet<>());
             }
 
             sb.append("-----------------------------------");
@@ -476,8 +600,21 @@ public class BTree {
         }
     }
 
-    private void plotNode(RandomAccessFile raf, int nodeId, int level, StringBuilder sb) throws IOException {
+    private void plotNode(
+            RandomAccessFile raf,
+            int nodeId,
+            int level,
+            StringBuilder sb,
+            Set<Integer> visited
+    ) throws IOException {
         if (nodeId == 0) {
+            return;
+        }
+
+        if (!visited.add(nodeId)) {
+            sb.append("    ".repeat(level));
+            sb.append(nodeId);
+            sb.append(": <referência repetida>\n");
             return;
         }
 
@@ -490,7 +627,7 @@ public class BTree {
             return;
         }
 
-        plotNode(raf, node.getA(node.getN()), level + 1, sb);
+        plotNode(raf, node.getA(node.getN()), level + 1, sb, visited);
 
         sb.append("    ".repeat(level));
         sb.append(nodeId);
@@ -499,7 +636,7 @@ public class BTree {
         sb.append("\n");
 
         for (int i = node.getN() - 1; i >= 0; i--) {
-            plotNode(raf, node.getA(i), level + 1, sb);
+            plotNode(raf, node.getA(i), level + 1, sb, visited);
         }
     }
 
@@ -549,8 +686,6 @@ public class BTree {
             throw new IllegalStateException("Nó " + pId + " não existe no arquivo");
         }
 
-        // Caso 1: a chave está em nó interno.
-        // Substitui pela menor chave da subárvore direita.
         if (!p.isLeaf()) {
             int successorId = p.getA(i);
             Node successor = readNode(raf, successorId);
@@ -573,8 +708,9 @@ public class BTree {
             path.push(new PathEntry(successorId, successor));
 
             int successorKey = successor.getK(1);
+            int successorRecordAddress = successor.getB(1);
 
-            p.replaceKey(i, successorKey);
+            p.replaceKAPair(i, successorKey, successorRecordAddress);
             writeNode(raf, pId, p);
 
             pId = successorId;
@@ -582,7 +718,6 @@ public class BTree {
             p = successor;
         }
 
-        // A remoção física sempre acontece em uma folha.
         p.removeKAPairAt(i);
 
         fixAfterRemove(raf, path, pId, p);
@@ -590,7 +725,6 @@ public class BTree {
 
     private void fixAfterRemove(RandomAccessFile raf, Stack<PathEntry> path, int pId, Node p) throws IOException {
         while (true) {
-            // A raiz é caso especial: ela pode ficar com 0 chaves.
             if (pId == root) {
                 if (p.getN() == 0) {
                     if (p.isLeaf()) {
@@ -601,7 +735,6 @@ public class BTree {
                         raf.setLength(headerSize());
                         writeHeader(raf);
                     } else {
-
                         root = p.getA(0);
 
                         releaseNode(raf, pId);
@@ -613,7 +746,6 @@ public class BTree {
                 return;
             }
 
-            // Se o nó não ficou abaixo do mínimo, grava em disco.
             if (p.hasMinimumKeys()) {
                 writeNode(raf, pId, p);
                 return;
@@ -638,7 +770,6 @@ public class BTree {
 
             int childIndex = parent.findChildAddressIndex(pId);
 
-            // 1) Tenta redistribuir com o irmão direito.
             if (childIndex < parent.getN()) {
                 int rightId = parent.getA(childIndex + 1);
                 Node right = readNode(raf, rightId);
@@ -658,7 +789,6 @@ public class BTree {
                 }
             }
 
-            // 2) Tenta redistribuir com o irmão esquerdo.
             if (childIndex > 0) {
                 int leftId = parent.getA(childIndex - 1);
                 Node left = readNode(raf, leftId);
@@ -678,7 +808,6 @@ public class BTree {
                 }
             }
 
-            // 3) Se nenhum irmão pode emprestar, faz fusão.
             if (childIndex < parent.getN()) {
                 int rightId = parent.getA(childIndex + 1);
                 Node right = readNode(raf, rightId);
@@ -687,7 +816,7 @@ public class BTree {
                     throw new IllegalStateException("Irmão direito " + rightId + " não existe no arquivo");
                 }
 
-                p.mergeWithRight(parent.getK(childIndex + 1), right);
+                p.mergeWithRight(parent.getK(childIndex + 1), parent.getB(childIndex + 1), right);
                 parent.removeKAPairAt(childIndex + 1);
 
                 writeNode(raf, pId, p);
@@ -700,14 +829,13 @@ public class BTree {
                     throw new IllegalStateException("Irmão esquerdo " + leftId + " não existe no arquivo");
                 }
 
-                left.mergeWithRight(parent.getK(childIndex), p);
+                left.mergeWithRight(parent.getK(childIndex), parent.getB(childIndex), p);
                 parent.removeKAPairAt(childIndex);
 
                 writeNode(raf, leftId, left);
                 releaseNode(raf, pId);
             }
 
-            // Após a fusão, quem pode ter ficado abaixo do mínimo é o pai.
             pId = parentId;
             p = parent;
         }

@@ -4,43 +4,32 @@ public class SearchResult {
     private int p;
     private int i;
     private boolean found;
+    private int recordAddress;
 
     public SearchResult(int p, int i, boolean found) {
+        this(p, i, found, 0);
+    }
+
+    public SearchResult(int p, int i, boolean found, int recordAddress) {
         this.p = p;
         this.i = i;
         this.found = found;
-    }
-
-    public int getI() {
-        return i;
-    }
-
-    public void setI(int i) {
-        this.i = i;
+        this.recordAddress = recordAddress;
     }
 
     public int getP() {
         return p;
     }
 
-    public void setP(int p) {
-        this.p = p;
+    public int getI() {
+        return i;
     }
 
     public boolean getFound() {
         return found;
     }
 
-    public void setFound(boolean found) {
-        this.found = found;
-    }
-
-    @Override
-    public String toString() {
-        return "SearchResult{" +
-                "p=" + p +
-                ", i=" + i +
-                ", j=" + found +
-                '}';
+    public int getRecordAddress() {
+        return recordAddress;
     }
 }

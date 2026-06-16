@@ -1,41 +1,48 @@
 package entities;
 
 public class KAPair {
-    // fields
     private int k;
     private int a;
+    private int b;
 
-    // constructors
-    public KAPair(){}
+    public KAPair() {}
+
     public KAPair(int k, int a) {
+        this(k, a, 0);
+    }
+
+    public KAPair(int k, int a, int b) {
         this.k = k;
         this.a = a;
-    }
-
-    // properties
-    public void setA(int a) {
-        this.a = a;
-    }
-
-    public int getA() {
-        return a;
-    }
-
-    public void setK(int k) {
-        this.k = k;
+        this.b = b;
     }
 
     public int getK() {
         return k;
     }
 
+    public void setK(int k) {
+        this.k = k;
+    }
+
+    public int getA() {
+        return a;
+    }
+
+    public void setA(int a) {
+        this.a = a;
+    }
+
+    public int getB() {
+        return b;
+    }
+
+    public void setB(int b) {
+        this.b = b;
+    }
+
     @Override
     public String toString() {
-        StringBuilder sb = new StringBuilder("(");
-        sb.append(k);
-        sb.append(", ");
-        sb.append(a);
-        sb.append(")");
-        return sb.toString();
+        return "(" + k + ", " + a + ", " + b + ")";
     }
 }
