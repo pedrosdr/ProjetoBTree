@@ -9,6 +9,7 @@ import java.util.Stack;
 public class BTree {
     private final String filePath;
     private final int m;
+    private final boolean reuseEnabled;
 
     private int root;
     private int maxRecords;
@@ -18,6 +19,10 @@ public class BTree {
     private final DiskAccessCounter diskAccessCounter;
 
     private BTree(String filePath, int m) {
+        this(filePath, m, true);
+    }
+
+    private BTree(String filePath, int m, boolean reuseEnabled) {
         if (filePath == null || filePath.isBlank()) {
             throw new IllegalArgumentException("filePath não pode ser vazio");
         }
@@ -28,11 +33,16 @@ public class BTree {
 
         this.filePath = filePath;
         this.m = m;
+        this.reuseEnabled = reuseEnabled;
         this.diskAccessCounter = new DiskAccessCounter();
     }
 
     public static BTree createNew(String filePath, int m) {
-        BTree btree = new BTree(filePath, m);
+        return createNew(filePath, m, true);
+    }
+
+    public static BTree createNew(String filePath, int m, boolean reuseEnabled) {
+        BTree btree = new BTree(filePath, m, reuseEnabled);
 
         btree.root = 0;
         btree.maxRecords = 0;
@@ -44,30 +54,47 @@ public class BTree {
     }
 
     public static BTree createNew(String indexFilePath, String mainFilePath, int m) {
-        BTree btree = new BTree(indexFilePath, m);
+        return createNew(indexFilePath, mainFilePath, m, true);
+    }
+
+    public static BTree createNew(
+            String indexFilePath,
+            String mainFilePath,
+            int m,
+            boolean reuseEnabled
+    ) {
+        BTree btree = new BTree(indexFilePath, m, reuseEnabled);
 
         btree.root = 0;
         btree.maxRecords = 0;
         btree.freeStack = 0;
-        btree.mainFile = MainFile.createNew(mainFilePath, btree.diskAccessCounter);
+        btree.mainFile = MainFile.createNew(
+                mainFilePath,
+                btree.diskAccessCounter,
+                reuseEnabled
+        );
         btree.initializeFile();
 
         return btree;
     }
 
     public static BTree fromFile(String filePath) {
+        return fromFile(filePath, true);
+    }
+
+    public static BTree fromFile(String filePath, boolean reuseEnabled) {
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "r")) {
             int root = raf.readInt();
             int m = raf.readInt();
             int maxRecords = raf.readInt();
             int freeStack = raf.readInt();
 
-            BTree btree = new BTree(filePath, m);
+            BTree btree = new BTree(filePath, m, reuseEnabled);
             btree.countRead();
 
             btree.root = root;
             btree.maxRecords = maxRecords;
-            btree.freeStack = freeStack;
+            btree.freeStack = reuseEnabled ? freeStack : 0;
             btree.mainFile = null;
 
             return btree;
@@ -77,19 +104,31 @@ public class BTree {
     }
 
     public static BTree fromFile(String indexFilePath, String mainFilePath) {
+        return fromFile(indexFilePath, mainFilePath, true);
+    }
+
+    public static BTree fromFile(
+            String indexFilePath,
+            String mainFilePath,
+            boolean reuseEnabled
+    ) {
         try (RandomAccessFile raf = new RandomAccessFile(indexFilePath, "r")) {
             int root = raf.readInt();
             int m = raf.readInt();
             int maxRecords = raf.readInt();
             int freeStack = raf.readInt();
 
-            BTree btree = new BTree(indexFilePath, m);
+            BTree btree = new BTree(indexFilePath, m, reuseEnabled);
             btree.countRead();
 
             btree.root = root;
             btree.maxRecords = maxRecords;
-            btree.freeStack = freeStack;
-            btree.mainFile = MainFile.fromFile(mainFilePath, btree.diskAccessCounter);
+            btree.freeStack = reuseEnabled ? freeStack : 0;
+            btree.mainFile = MainFile.fromFile(
+                    mainFilePath,
+                    btree.diskAccessCounter,
+                    reuseEnabled
+            );
 
             return btree;
         } catch (IOException ex) {
@@ -100,6 +139,12 @@ public class BTree {
     public void setMainFile(MainFile mainFile) {
         if (mainFile == null) {
             throw new IllegalArgumentException("mainFile não pode ser null");
+        }
+
+        if (mainFile.isReuseEnabled() != reuseEnabled) {
+            throw new IllegalArgumentException(
+                    "MainFile deve usar o mesmo valor de reuseEnabled da BTree"
+            );
         }
 
         mainFile.setDiskAccessCounter(diskAccessCounter);
@@ -120,6 +165,10 @@ public class BTree {
 
     public DiskAccessCounter getDiskAccessCounter() {
         return diskAccessCounter;
+    }
+
+    public boolean isReuseEnabled() {
+        return reuseEnabled;
     }
 
     public int getFreeStack() {
@@ -169,7 +218,7 @@ public class BTree {
         raf.writeInt(root);
         raf.writeInt(m);
         raf.writeInt(maxRecords);
-        raf.writeInt(freeStack);
+        raf.writeInt(reuseEnabled ? freeStack : 0);
     }
 
     private int nodeSize() {
@@ -192,7 +241,7 @@ public class BTree {
     }
 
     private int nextNodeId(RandomAccessFile raf) throws IOException {
-        if (freeStack != 0) {
+        if (reuseEnabled && freeStack != 0) {
             int id = freeStack;
 
             raf.seek(nodePosition(id));
@@ -215,6 +264,10 @@ public class BTree {
     private void releaseNode(RandomAccessFile raf, int id) throws IOException {
         if (id <= 0 || id > maxRecords) {
             throw new IllegalArgumentException("id inválido para liberação: " + id);
+        }
+
+        if (!reuseEnabled) {
+            return;
         }
 
         raf.seek(nodePosition(id));
@@ -764,17 +817,24 @@ public class BTree {
                 if (p.getN() == 0) {
                     if (p.isLeaf()) {
                         root = 0;
-                        maxRecords = 0;
-                        freeStack = 0;
 
-                        countWrite();
-                        raf.setLength(headerSize());
+                        if (reuseEnabled) {
+                            maxRecords = 0;
+                            freeStack = 0;
+
+                            countWrite();
+                            raf.setLength(headerSize());
+                        }
 
                         writeHeader(raf);
                     } else {
                         root = p.getA(0);
 
-                        releaseNode(raf, pId);
+                        if (reuseEnabled) {
+                            releaseNode(raf, pId);
+                        } else {
+                            writeHeader(raf);
+                        }
                     }
                 } else {
                     writeNode(raf, pId, p);

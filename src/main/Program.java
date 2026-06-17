@@ -1,7 +1,10 @@
 package main;
 
+import entities.BenchmarkCsv;
+
 public class Program {
     public static void main(String[] args) {
-        Tests.diskAccess();
+//        BenchmarkCsv benchmark = new BenchmarkCsv();
+//        benchmark.run();
     }
 }

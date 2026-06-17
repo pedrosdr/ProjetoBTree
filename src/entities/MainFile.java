@@ -7,22 +7,29 @@ public class MainFile {
     private static final int NAME_SIZE = 80;
 
     private final String filePath;
+    private final boolean reuseEnabled;
+
     private int maxRecords;
     private int freeStack;
 
     private DiskAccessCounter diskAccessCounter;
 
     public MainFile(String filePath) {
-        this(filePath, null);
+        this(filePath, null, true);
     }
 
     public MainFile(String filePath, DiskAccessCounter diskAccessCounter) {
+        this(filePath, diskAccessCounter, true);
+    }
+
+    public MainFile(String filePath, DiskAccessCounter diskAccessCounter, boolean reuseEnabled) {
         if (filePath == null || filePath.isBlank()) {
             throw new IllegalArgumentException("filePath não pode ser null");
         }
 
         this.filePath = filePath;
         this.diskAccessCounter = diskAccessCounter;
+        this.reuseEnabled = reuseEnabled;
     }
 
     public void setDiskAccessCounter(DiskAccessCounter diskAccessCounter) {
@@ -31,6 +38,10 @@ public class MainFile {
 
     public String getFilePath() {
         return filePath;
+    }
+
+    public boolean isReuseEnabled() {
+        return reuseEnabled;
     }
 
     public int getMaxRecords() {
@@ -62,12 +73,20 @@ public class MainFile {
     }
 
     public static MainFile fromFile(String filePath) {
-        return fromFile(filePath, null);
+        return fromFile(filePath, null, true);
     }
 
     public static MainFile fromFile(String filePath, DiskAccessCounter diskAccessCounter) {
+        return fromFile(filePath, diskAccessCounter, true);
+    }
+
+    public static MainFile fromFile(
+            String filePath,
+            DiskAccessCounter diskAccessCounter,
+            boolean reuseEnabled
+    ) {
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "r")) {
-            MainFile file = new MainFile(filePath, diskAccessCounter);
+            MainFile file = new MainFile(filePath, diskAccessCounter, reuseEnabled);
 
             countMainFileHeaderRead(file);
 
@@ -75,7 +94,7 @@ public class MainFile {
             int freeStack = raf.readInt();
 
             file.maxRecords = maxRecords;
-            file.freeStack = freeStack;
+            file.freeStack = reuseEnabled ? freeStack : 0;
 
             return file;
         } catch (IOException ex) {
@@ -88,11 +107,19 @@ public class MainFile {
     }
 
     public static MainFile createNew(String filePath) {
-        return createNew(filePath, null);
+        return createNew(filePath, null, true);
     }
 
     public static MainFile createNew(String filePath, DiskAccessCounter diskAccessCounter) {
-        MainFile file = new MainFile(filePath, diskAccessCounter);
+        return createNew(filePath, diskAccessCounter, true);
+    }
+
+    public static MainFile createNew(
+            String filePath,
+            DiskAccessCounter diskAccessCounter,
+            boolean reuseEnabled
+    ) {
+        MainFile file = new MainFile(filePath, diskAccessCounter, reuseEnabled);
 
         file.maxRecords = 0;
         file.freeStack = 0;
@@ -132,7 +159,7 @@ public class MainFile {
         countWrite();
 
         raf.writeInt(maxRecords);
-        raf.writeInt(freeStack);
+        raf.writeInt(reuseEnabled ? freeStack : 0);
     }
 
     private long recordPosition(int recordId) {
@@ -144,7 +171,7 @@ public class MainFile {
     }
 
     private int nextRecordId(RandomAccessFile raf) throws IOException {
-        if (freeStack != 0) {
+        if (reuseEnabled && freeStack != 0) {
             int id = freeStack;
 
             raf.seek(recordPosition(id));
@@ -229,6 +256,10 @@ public class MainFile {
     private void releaseRecord(RandomAccessFile raf, int id) throws IOException {
         if (!recordExists(id)) {
             throw new IllegalArgumentException("id inválido: " + id);
+        }
+
+        if (!reuseEnabled) {
+            return;
         }
 
         raf.seek(recordPosition(id));
