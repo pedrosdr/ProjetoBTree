@@ -9,29 +9,32 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Implementa uma camada simples de consulta sobre uma {@link BTree}.
+ * Implementa uma camada simples de consulta e modificação sobre uma {@link BTree}.
  *
- * <p>Esta classe suporta consultas baseadas exclusivamente no campo {@code key},
- * pois a árvore B funciona como índice ordenado pela chave dos registros.</p>
+ * <p>Esta classe trabalha apenas com operações baseadas em {@code key}, pois a
+ * árvore B é o índice primário da aplicação.</p>
  *
- * <p>Consultas por igualdade usam diretamente a busca indexada da árvore B.
- * Consultas por intervalo percorrem a árvore B em ordem e visitam apenas os ramos
- * que podem conter chaves dentro da condição configurada.</p>
- *
- * <p>Exemplos de uso:</p>
+ * <p>Operações suportadas:</p>
  *
  * <pre>
- * Query query = new Query(btree);
+ * SELECT *;
+ * SELECT * WHERE key = x;
+ * SELECT * WHERE key BETWEEN min AND max;
+ * SELECT * WHERE key > x;
+ * SELECT * WHERE key >= x;
+ * SELECT * WHERE key < x;
+ * SELECT * WHERE key <= x;
  *
- * Record record = query
- *         .select()
- *         .whereKeyEquals(10)
- *         .executeOne();
+ * INSERT record;
+ * REMOVE WHERE key = x;
+ * UPDATE WHERE key = x;
+ * INSERT OR UPDATE record;
+ * </pre>
  *
- * List&lt;Record&gt; records = query
- *         .select()
- *         .whereKeyBetween(10, 30)
- *         .execute();
+ * <p>O método {@link #whereKeyBetween(int, int)} usa intervalo fechado:</p>
+ *
+ * <pre>
+ * minKey <= key <= maxKey
  * </pre>
  */
 public class Query {
@@ -49,7 +52,6 @@ public class Query {
      * Cria uma consulta associada a uma árvore B.
      *
      * @param btree árvore B usada como índice.
-     * @throws IllegalArgumentException se {@code btree} for {@code null}.
      */
     public Query(BTree btree) {
         if (btree == null) {
@@ -62,8 +64,6 @@ public class Query {
 
     /**
      * Inicia uma nova consulta do tipo SELECT.
-     *
-     * <p>Este método limpa qualquer condição anterior definida nesta instância.</p>
      *
      * @return a própria consulta.
      */
@@ -78,9 +78,6 @@ public class Query {
      * <pre>
      * WHERE key = value
      * </pre>
-     *
-     * <p>Consulta que usa diretamente a busca indexada
-     * da árvore B.</p>
      *
      * @param key chave procurada.
      * @return a própria consulta.
@@ -100,25 +97,15 @@ public class Query {
      * WHERE key BETWEEN minKey AND maxKey
      * </pre>
      *
-     * <p>O intervalo é fechado, isto é, as extremidades são incluídas:</p>
+     * <p>O intervalo é fechado, ou seja:</p>
      *
      * <pre>
      * minKey <= key <= maxKey
      * </pre>
      *
-     * <p>Portanto, se a consulta for:</p>
-     *
-     * <pre>
-     * whereKeyBetween(10, 30)
-     * </pre>
-     *
-     * <p>serão retornados registros com chave {@code 10}, {@code 30} e qualquer
-     * chave entre elas.</p>
-     *
      * @param minKey menor chave aceita, inclusive.
      * @param maxKey maior chave aceita, inclusive.
      * @return a própria consulta.
-     * @throws IllegalArgumentException se {@code minKey > maxKey}.
      */
     public Query whereKeyBetween(int minKey, int maxKey) {
         if (minKey > maxKey) {
@@ -142,9 +129,6 @@ public class Query {
      * WHERE key > value
      * </pre>
      *
-     * <p>O limite inferior é aberto, ou seja, a própria chave {@code value}
-     * não é incluída no resultado.</p>
-     *
      * @param key limite inferior exclusivo.
      * @return a própria consulta.
      */
@@ -163,9 +147,6 @@ public class Query {
      * <pre>
      * WHERE key >= value
      * </pre>
-     *
-     * <p>O limite inferior é fechado, ou seja, a própria chave {@code value}
-     * é incluída no resultado se existir.</p>
      *
      * @param key limite inferior inclusivo.
      * @return a própria consulta.
@@ -186,9 +167,6 @@ public class Query {
      * WHERE key < value
      * </pre>
      *
-     * <p>O limite superior é aberto, ou seja, a própria chave {@code value}
-     * não é incluída no resultado.</p>
-     *
      * @param key limite superior exclusivo.
      * @return a própria consulta.
      */
@@ -208,9 +186,6 @@ public class Query {
      * WHERE key <= value
      * </pre>
      *
-     * <p>O limite superior é fechado, ou seja, a própria chave {@code value}
-     * é incluída no resultado se existir.</p>
-     *
      * @param key limite superior inclusivo.
      * @return a própria consulta.
      */
@@ -224,12 +199,202 @@ public class Query {
     }
 
     /**
+     * Insere um novo registro na árvore B e no arquivo principal.
+     *
+     * <p>Se já existir um registro com a mesma chave, a inserção falha e retorna
+     * {@code false}.</p>
+     *
+     * @param record registro a inserir.
+     * @return {@code true} se o registro foi inserido; {@code false} caso a chave já exista.
+     */
+    public boolean insert(Record record) {
+        if (record == null) {
+            throw new IllegalArgumentException("record não pode ser null");
+        }
+
+        return btree.insertRecord(record);
+    }
+
+    /**
+     * Insere um novo registro na árvore B e no arquivo principal.
+     *
+     * @param key chave do registro.
+     * @param name nome do registro.
+     * @param age idade do registro.
+     * @return {@code true} se o registro foi inserido; {@code false} caso a chave já exista.
+     */
+    public boolean insert(int key, String name, short age) {
+        return insert(new Record(key, name, age));
+    }
+
+    /**
+     * Insere um registro se a chave ainda não existir.
+     * Caso a chave já exista, atualiza o registro existente.
+     *
+     * <p>Esta operação equivale a um UPSERT:</p>
+     *
+     * <pre>
+     * INSERT OR UPDATE
+     * </pre>
+     *
+     * @param record registro a inserir ou atualizar.
+     * @return {@code true} se a operação foi concluída.
+     */
+    public boolean insertOrUpdate(Record record) {
+        if (record == null) {
+            throw new IllegalArgumentException("record não pode ser null");
+        }
+
+        Record existing = btree.searchRecord(record.getKey());
+
+        if (existing == null) {
+            return btree.insertRecord(record);
+        }
+
+        return updateByKey(record.getKey(), record);
+    }
+
+    /**
+     * Atualiza o registro selecionado por:
+     *
+     * <pre>
+     * WHERE key = x
+     * </pre>
+     *
+     * <p>Exemplo:</p>
+     *
+     * <pre>
+     * query.whereKeyEquals(10).update(new Record(10, "Ana", (short) 20));
+     * </pre>
+     *
+     * <p>Se o novo registro tiver uma chave diferente da chave antiga, a operação
+     * funciona como troca de chave. Nesse caso, a nova chave não pode existir na árvore.</p>
+     *
+     * @param newRecord novo registro.
+     * @return {@code true} se o registro foi atualizado; {@code false} se a chave antiga não existir.
+     */
+    public boolean update(Record newRecord) {
+        if (equalsKey == null) {
+            throw new IllegalStateException(
+                    "update() exige uma condição WHERE key = x. Use whereKeyEquals(x)."
+            );
+        }
+
+        return updateByKey(equalsKey, newRecord);
+    }
+
+    /**
+     * Atualiza o registro selecionado por {@code WHERE key = x}, mantendo a mesma chave.
+     *
+     * <p>Exemplo:</p>
+     *
+     * <pre>
+     * query.whereKeyEquals(10).update("Ana Silva", (short) 21);
+     * </pre>
+     *
+     * @param name novo nome.
+     * @param age nova idade.
+     * @return {@code true} se o registro foi atualizado; {@code false} se a chave não existir.
+     */
+    public boolean update(String name, short age) {
+        if (equalsKey == null) {
+            throw new IllegalStateException(
+                    "update() exige uma condição WHERE key = x. Use whereKeyEquals(x)."
+            );
+        }
+
+        return updateByKey(equalsKey, new Record(equalsKey, name, age));
+    }
+
+    /**
+     * Atualiza diretamente o registro associado a uma chave.
+     *
+     * @param key chave antiga do registro.
+     * @param newRecord novo registro.
+     * @return {@code true} se o registro foi atualizado; {@code false} se a chave antiga não existir.
+     */
+    public boolean updateByKey(int key, Record newRecord) {
+        if (newRecord == null) {
+            throw new IllegalArgumentException("newRecord não pode ser null");
+        }
+
+        Record oldRecord = btree.searchRecord(key);
+
+        if (oldRecord == null) {
+            return false;
+        }
+
+        boolean changesKey = newRecord.getKey() != key;
+
+        if (changesKey && btree.searchRecord(newRecord.getKey()) != null) {
+            return false;
+        }
+
+        boolean removed = btree.removeRecord(key);
+
+        if (!removed) {
+            return false;
+        }
+
+        boolean inserted = btree.insertRecord(newRecord);
+
+        if (!inserted) {
+            boolean rollback = btree.insertRecord(oldRecord);
+
+            if (!rollback) {
+                throw new IllegalStateException(
+                        "Falha ao atualizar registro e falha ao restaurar registro antigo"
+                );
+            }
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Remove o registro selecionado por:
+     *
+     * <pre>
+     * WHERE key = x
+     * </pre>
+     *
+     * <p>Exemplo:</p>
+     *
+     * <pre>
+     * query.whereKeyEquals(10).remove();
+     * </pre>
+     *
+     * @return {@code true} se o registro foi removido; {@code false} se a chave não existir.
+     */
+    public boolean remove() {
+        if (equalsKey == null) {
+            throw new IllegalStateException(
+                    "remove() exige uma condição WHERE key = x. Use whereKeyEquals(x)."
+            );
+        }
+
+        return btree.removeRecord(equalsKey);
+    }
+
+    /**
+     * Remove diretamente o registro associado a uma chave.
+     *
+     * @param key chave do registro a remover.
+     * @return {@code true} se o registro foi removido; {@code false} se a chave não existir.
+     */
+    public boolean removeByKey(int key) {
+        return btree.removeRecord(key);
+    }
+
+    /**
      * Executa a consulta e retorna todos os registros encontrados.
      *
      * <p>Se nenhuma condição {@code where} for definida, todos os registros ativos
-     * indexados pela árvore B serão retornados em ordem crescente de chave.</p>
+     * indexados pela árvore B são retornados em ordem crescente de chave.</p>
      *
-     * @return lista de registros que satisfazem a condição configurada.
+     * @return lista de registros encontrados.
      */
     public List<Record> execute() {
         if (equalsKey != null) {
@@ -252,14 +417,7 @@ public class Query {
     /**
      * Executa a consulta esperando no máximo um registro.
      *
-     * <p>Este método é recomendado principalmente para consultas por igualdade:</p>
-     *
-     * <pre>
-     * query.select().whereKeyEquals(10).executeOne();
-     * </pre>
-     *
-     * @return o registro encontrado, ou {@code null} se nenhum registro satisfizer a consulta.
-     * @throws IllegalStateException se a consulta retornar mais de um registro.
+     * @return registro encontrado, ou {@code null} se não houver resultado.
      */
     public Record executeOne() {
         List<Record> records = execute();
@@ -272,16 +430,9 @@ public class Query {
             throw new IllegalStateException("A consulta retornou mais de um registro");
         }
 
-        return records.getFirst();
+        return records.get(0);
     }
 
-    /**
-     * Percorre a árvore B em ordem, coletando os registros cujas chaves satisfazem
-     * a condição configurada.
-     *
-     * @param nodeId identificador do nó atual.
-     * @param records lista acumuladora de registros.
-     */
     private void collectByRange(int nodeId, List<Record> records) {
         if (nodeId == 0) {
             return;
@@ -314,14 +465,6 @@ public class Query {
         }
     }
 
-    /**
-     * Lê o registro do arquivo principal a partir do endereço armazenado no nó da árvore B.
-     *
-     * @param node nó que contém o endereço do registro.
-     * @param keyIndex posição lógica da chave no nó, iniciando em {@code 1}.
-     * @return registro lido do arquivo principal.
-     * @throws IllegalStateException se a árvore B não possuir arquivo principal associado.
-     */
     private Record readRecordFromNode(Node node, int keyIndex) {
         MainFile mainFile = btree.getMainFile();
 
@@ -332,16 +475,6 @@ public class Query {
         return mainFile.readRecord(node.getB(keyIndex));
     }
 
-    /**
-     * Decide se um filho pode conter alguma chave dentro do intervalo configurado.
-     *
-     * <p>Esta verificação evita visitar ramos que certamente estão fora da condição
-     * da consulta. Ela é usada apenas para consultas por intervalo.</p>
-     *
-     * @param node nó atual.
-     * @param childIndex índice do filho no vetor de ponteiros do nó.
-     * @return {@code true} se o filho deve ser visitado.
-     */
     private boolean shouldVisitChild(Node node, int childIndex) {
         if (minKey == null && maxKey == null) {
             return true;
@@ -371,12 +504,6 @@ public class Query {
         return true;
     }
 
-    /**
-     * Verifica se uma chave satisfaz a condição configurada.
-     *
-     * @param key chave a testar.
-     * @return {@code true} se a chave pertence ao resultado da consulta.
-     */
     private boolean matchesRange(int key) {
         if (minKey != null) {
             if (key < minKey) {
@@ -401,9 +528,6 @@ public class Query {
         return true;
     }
 
-    /**
-     * Remove todas as condições configuradas na consulta.
-     */
     private void clearConditions() {
         equalsKey = null;
 
