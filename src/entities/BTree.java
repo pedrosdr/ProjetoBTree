@@ -6,6 +6,14 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.Stack;
 
+/**
+ * Implementa uma árvore B persistida em arquivo, com suporte opcional à reutilização
+ * de posições removidas e integração com um arquivo principal de registros.
+ *
+ * <p>A classe mantém um arquivo de índice composto por um cabeçalho e por nós de
+ * tamanho fixo. Cada chave pode apontar para um endereço de registro no
+ * {@link MainFile}, permitindo operações combinadas de índice e armazenamento de dados.</p>
+ */
 public class BTree {
     private final String filePath;
     private final int m;
@@ -18,10 +26,25 @@ public class BTree {
     private MainFile mainFile;
     private final DiskAccessCounter diskAccessCounter;
 
+    /**
+     * Cria uma instância de árvore B usando reutilização de espaço por padrão.
+     *
+     * @param filePath caminho do arquivo de índice da árvore B.
+     * @param m ordem da árvore B.
+     * @throws IllegalArgumentException se o caminho for vazio ou se {@code m < 3}.
+     */
     private BTree(String filePath, int m) {
         this(filePath, m, true);
     }
 
+    /**
+     * Cria uma instância de árvore B com configuração explícita de reutilização.
+     *
+     * @param filePath caminho do arquivo de índice da árvore B.
+     * @param m ordem da árvore B.
+     * @param reuseEnabled indica se nós removidos podem ser reaproveitados.
+     * @throws IllegalArgumentException se o caminho for vazio ou se {@code m < 3}.
+     */
     private BTree(String filePath, int m, boolean reuseEnabled) {
         if (filePath == null || filePath.isBlank()) {
             throw new IllegalArgumentException("filePath não pode ser vazio");
@@ -37,10 +60,25 @@ public class BTree {
         this.diskAccessCounter = new DiskAccessCounter();
     }
 
+    /**
+     * Cria um novo arquivo de índice para uma árvore B sem arquivo principal associado.
+     *
+     * @param filePath caminho do arquivo de índice a ser criado ou sobrescrito.
+     * @param m ordem da árvore B.
+     * @return árvore B inicializada e vazia.
+     */
     public static BTree createNew(String filePath, int m) {
         return createNew(filePath, m, true);
     }
 
+    /**
+     * Cria um novo arquivo de índice para uma árvore B sem arquivo principal associado.
+     *
+     * @param filePath caminho do arquivo de índice a ser criado ou sobrescrito.
+     * @param m ordem da árvore B.
+     * @param reuseEnabled indica se nós removidos podem ser reaproveitados.
+     * @return árvore B inicializada e vazia.
+     */
     public static BTree createNew(String filePath, int m, boolean reuseEnabled) {
         BTree btree = new BTree(filePath, m, reuseEnabled);
 
@@ -53,10 +91,28 @@ public class BTree {
         return btree;
     }
 
+    /**
+     * Cria uma nova árvore B associada a um novo arquivo principal.
+     *
+     * @param indexFilePath caminho do arquivo de índice.
+     * @param mainFilePath caminho do arquivo principal.
+     * @param m ordem da árvore B.
+     * @return árvore B vazia com arquivo principal associado.
+     */
     public static BTree createNew(String indexFilePath, String mainFilePath, int m) {
         return createNew(indexFilePath, mainFilePath, m, true);
     }
 
+    /**
+     * Cria uma nova árvore B associada a um novo arquivo principal com configuração
+     * explícita de reutilização de espaço.
+     *
+     * @param indexFilePath caminho do arquivo de índice.
+     * @param mainFilePath caminho do arquivo principal.
+     * @param m ordem da árvore B.
+     * @param reuseEnabled indica se nós e registros removidos podem ser reaproveitados.
+     * @return árvore B vazia com arquivo principal associado.
+     */
     public static BTree createNew(
             String indexFilePath,
             String mainFilePath,
@@ -78,10 +134,23 @@ public class BTree {
         return btree;
     }
 
+    /**
+     * Carrega uma árvore B existente a partir de um arquivo de índice.
+     *
+     * @param filePath caminho do arquivo de índice existente.
+     * @return árvore B carregada sem arquivo principal associado.
+     */
     public static BTree fromFile(String filePath) {
         return fromFile(filePath, true);
     }
 
+    /**
+     * Carrega uma árvore B existente a partir de um arquivo de índice.
+     *
+     * @param filePath caminho do arquivo de índice existente.
+     * @param reuseEnabled indica se a pilha livre persistida deve ser usada.
+     * @return árvore B carregada sem arquivo principal associado.
+     */
     public static BTree fromFile(String filePath, boolean reuseEnabled) {
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "r")) {
             int root = raf.readInt();
@@ -103,10 +172,26 @@ public class BTree {
         }
     }
 
+    /**
+     * Carrega uma árvore B existente junto com seu arquivo principal.
+     *
+     * @param indexFilePath caminho do arquivo de índice existente.
+     * @param mainFilePath caminho do arquivo principal existente.
+     * @return árvore B carregada com arquivo principal associado.
+     */
     public static BTree fromFile(String indexFilePath, String mainFilePath) {
         return fromFile(indexFilePath, mainFilePath, true);
     }
 
+    /**
+     * Carrega uma árvore B existente junto com seu arquivo principal e configuração
+     * explícita de reutilização de espaço.
+     *
+     * @param indexFilePath caminho do arquivo de índice existente.
+     * @param mainFilePath caminho do arquivo principal existente.
+     * @param reuseEnabled indica se as pilhas livres persistidas devem ser usadas.
+     * @return árvore B carregada com arquivo principal associado.
+     */
     public static BTree fromFile(
             String indexFilePath,
             String mainFilePath,
@@ -136,6 +221,13 @@ public class BTree {
         }
     }
 
+    /**
+     * Associa um arquivo principal à árvore B.
+     *
+     * @param mainFile arquivo principal a ser vinculado.
+     * @throws IllegalArgumentException se o arquivo for nulo ou usar configuração de
+     *                                  reutilização incompatível.
+     */
     public void setMainFile(MainFile mainFile) {
         if (mainFile == null) {
             throw new IllegalArgumentException("mainFile não pode ser null");
@@ -151,6 +243,12 @@ public class BTree {
         this.mainFile = mainFile;
     }
 
+    /**
+     * Obtém o arquivo principal associado, exigindo que ele tenha sido configurado.
+     *
+     * @return arquivo principal associado.
+     * @throws IllegalStateException se não houver arquivo principal associado.
+     */
     private MainFile requireMainFile() {
         if (mainFile == null) {
             throw new IllegalStateException("Arquivo principal não foi associado à BTree");
@@ -159,46 +257,95 @@ public class BTree {
         return mainFile;
     }
 
+    /**
+     * Retorna o arquivo principal associado à árvore B.
+     *
+     * @return arquivo principal associado, ou {@code null} quando inexistente.
+     */
     public MainFile getMainFile() {
         return mainFile;
     }
 
+    /**
+     * Retorna o contador compartilhado de acessos a disco.
+     *
+     * @return contador de leituras e escritas da árvore e do arquivo principal.
+     */
     public DiskAccessCounter getDiskAccessCounter() {
         return diskAccessCounter;
     }
 
+    /**
+     * Informa se a reutilização de posições livres está habilitada.
+     *
+     * @return {@code true} se nós removidos podem ser reaproveitados.
+     */
     public boolean isReuseEnabled() {
         return reuseEnabled;
     }
 
+    /**
+     * Retorna o topo da pilha livre de nós.
+     *
+     * @return identificador do primeiro nó livre, ou {@code 0} se a pilha estiver vazia.
+     */
     public int getFreeStack() {
         return freeStack;
     }
 
+    /**
+     * Retorna o caminho do arquivo de índice da árvore B.
+     *
+     * @return caminho do arquivo persistente da árvore.
+     */
     public String getFilePath() {
         return filePath;
     }
 
+    /**
+     * Retorna a ordem da árvore B.
+     *
+     * @return valor de {@code m} usado nos nós.
+     */
     public int getM() {
         return m;
     }
 
+    /**
+     * Retorna o identificador do nó raiz.
+     *
+     * @return id da raiz, ou {@code 0} quando a árvore está vazia.
+     */
     public int getRoot() {
         return root;
     }
 
+    /**
+     * Retorna o maior identificador de nó já alocado no arquivo.
+     *
+     * @return maior id de nó registrado no cabeçalho.
+     */
     public int getMaxRecords() {
         return maxRecords;
     }
 
+    /**
+     * Registra uma leitura realizada no arquivo de índice da árvore B.
+     */
     private void countRead() {
         diskAccessCounter.countBTreeRead();
     }
 
+    /**
+     * Registra uma escrita realizada no arquivo de índice da árvore B.
+     */
     private void countWrite() {
         diskAccessCounter.countBTreeWrite();
     }
 
+    /**
+     * Inicializa ou sobrescreve o arquivo de índice com um cabeçalho vazio.
+     */
     private void initializeFile() {
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
             countWrite();
@@ -210,6 +357,12 @@ public class BTree {
         }
     }
 
+    /**
+     * Persiste o cabeçalho da árvore B no início do arquivo de índice.
+     *
+     * @param raf arquivo de índice aberto para escrita.
+     * @throws IOException se ocorrer falha de E/S durante a escrita.
+     */
     private void writeHeader(RandomAccessFile raf) throws IOException {
         raf.seek(0);
 
@@ -221,6 +374,11 @@ public class BTree {
         raf.writeInt(reuseEnabled ? freeStack : 0);
     }
 
+    /**
+     * Calcula o tamanho fixo, em bytes, de cada nó no arquivo.
+     *
+     * @return quantidade de bytes reservada para um nó.
+     */
     private int nodeSize() {
         return Integer.BYTES
                 + Integer.BYTES * m
@@ -228,10 +386,22 @@ public class BTree {
                 + Integer.BYTES * (m - 1);
     }
 
+    /**
+     * Calcula o tamanho do cabeçalho do arquivo de índice.
+     *
+     * @return tamanho do cabeçalho em bytes.
+     */
     private int headerSize() {
         return nodeSize();
     }
 
+    /**
+     * Calcula a posição física de um nó no arquivo de índice.
+     *
+     * @param id identificador do nó, iniciando em {@code 1}.
+     * @return offset do nó no arquivo.
+     * @throws IllegalArgumentException se {@code id <= 0}.
+     */
     private long nodePosition(int id) {
         if (id <= 0) {
             throw new IllegalArgumentException("id deve ser maior que zero");
@@ -240,6 +410,16 @@ public class BTree {
         return headerSize() + (long) (id - 1) * nodeSize();
     }
 
+    /**
+     * Obtém o próximo identificador disponível para gravação de nó.
+     *
+     * <p>Quando a reutilização está habilitada, tenta remover um id da pilha livre;
+     * caso contrário, aloca um novo id sequencial.</p>
+     *
+     * @param raf arquivo de índice aberto para leitura e escrita.
+     * @return identificador disponível para um novo nó.
+     * @throws IOException se ocorrer falha de E/S.
+     */
     private int nextNodeId(RandomAccessFile raf) throws IOException {
         if (reuseEnabled && freeStack != 0) {
             int id = freeStack;
@@ -261,6 +441,14 @@ public class BTree {
         return maxRecords;
     }
 
+    /**
+     * Libera um nó removido, encadeando-o na pilha livre quando permitido.
+     *
+     * @param raf arquivo de índice aberto para escrita.
+     * @param id identificador do nó a liberar.
+     * @throws IOException se ocorrer falha de E/S.
+     * @throws IllegalArgumentException se o id for inválido.
+     */
     private void releaseNode(RandomAccessFile raf, int id) throws IOException {
         if (id <= 0 || id > maxRecords) {
             throw new IllegalArgumentException("id inválido para liberação: " + id);
@@ -281,6 +469,13 @@ public class BTree {
         writeHeader(raf);
     }
 
+    /**
+     * Grava um nó no arquivo de índice usando seu identificador persistente.
+     *
+     * @param id identificador do nó a ser gravado.
+     * @param node conteúdo do nó.
+     * @throws RuntimeException se ocorrer falha de E/S.
+     */
     public void writeNode(int id, Node node) {
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
             boolean headerChanged = false;
@@ -305,6 +500,15 @@ public class BTree {
         }
     }
 
+    /**
+     * Grava um nó no arquivo de índice já aberto.
+     *
+     * @param raf arquivo de índice aberto para escrita.
+     * @param id identificador do nó.
+     * @param node conteúdo do nó.
+     * @throws IOException se ocorrer falha de E/S.
+     * @throws IllegalArgumentException se o nó for nulo ou incompatível com a árvore.
+     */
     private void writeNode(RandomAccessFile raf, int id, Node node) throws IOException {
         if (node == null) {
             throw new IllegalArgumentException("node não pode ser null");
@@ -345,6 +549,13 @@ public class BTree {
         }
     }
 
+    /**
+     * Lê um nó do arquivo de índice.
+     *
+     * @param id identificador do nó desejado.
+     * @return nó lido, ou {@code null} se o id não existir no arquivo.
+     * @throws RuntimeException se ocorrer falha de E/S.
+     */
     public Node readNode(int id) {
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "r")) {
             return readNode(raf, id);
@@ -353,6 +564,14 @@ public class BTree {
         }
     }
 
+    /**
+     * Lê um nó a partir de um arquivo de índice já aberto.
+     *
+     * @param raf arquivo de índice aberto para leitura.
+     * @param id identificador do nó desejado.
+     * @return nó lido, ou {@code null} se o nó não existir.
+     * @throws IOException se ocorrer falha de E/S ou se o conteúdo do nó for inválido.
+     */
     private Node readNode(RandomAccessFile raf, int id) throws IOException {
         if (!nodeExists(id)) {
             return null;
@@ -402,6 +621,13 @@ public class BTree {
         return node;
     }
 
+    /**
+     * Busca uma chave na árvore B.
+     *
+     * @param key chave a ser procurada.
+     * @return resultado contendo a posição encontrada ou o ponto de descida final.
+     * @throws RuntimeException se ocorrer falha de E/S.
+     */
     public SearchResult search(int key) {
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "r")) {
             return search(raf, key, null);
@@ -410,6 +636,15 @@ public class BTree {
         }
     }
 
+    /**
+     * Busca uma chave usando um arquivo já aberto e, opcionalmente, registra o caminho percorrido.
+     *
+     * @param raf arquivo de índice aberto para leitura.
+     * @param key chave a ser procurada.
+     * @param path pilha a preencher com o caminho percorrido, ou {@code null} para ignorar.
+     * @return resultado da busca.
+     * @throws IOException se ocorrer falha de E/S.
+     */
     private SearchResult search(RandomAccessFile raf, int key, Stack<PathEntry> path) throws IOException {
         if (path != null) {
             path.clear();
@@ -443,10 +678,22 @@ public class BTree {
         return new SearchResult(q, i, false, 0);
     }
 
+    /**
+     * Insere uma chave na árvore B sem endereço de registro associado.
+     *
+     * @param key chave a inserir.
+     */
     public void insert(int key) {
         insert(key, 0);
     }
 
+    /**
+     * Insere uma chave na árvore B apontando para um endereço do arquivo principal.
+     *
+     * @param key chave a inserir.
+     * @param recordAddress endereço do registro associado à chave.
+     * @throws RuntimeException se ocorrer falha de E/S.
+     */
     public void insert(int key, int recordAddress) {
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
             insert(raf, key, recordAddress);
@@ -455,6 +702,17 @@ public class BTree {
         }
     }
 
+    /**
+     * Executa a inserção usando um arquivo de índice já aberto.
+     *
+     * <p>Quando há overflow, divide nós e propaga a chave promovida até que a árvore
+     * volte a satisfazer as propriedades de árvore B.</p>
+     *
+     * @param raf arquivo de índice aberto para leitura e escrita.
+     * @param key chave a inserir.
+     * @param recordAddress endereço do registro associado.
+     * @throws IOException se ocorrer falha de E/S.
+     */
     private void insert(RandomAccessFile raf, int key, int recordAddress) throws IOException {
         if (root == 0) {
             Node p = new Node(m);
@@ -528,6 +786,12 @@ public class BTree {
         writeHeader(raf);
     }
 
+    /**
+     * Divide um nó em overflow e calcula a chave promovida ao pai.
+     *
+     * @param node nó temporariamente com excesso de chaves.
+     * @return resultado contendo nó esquerdo, chave promovida e nó direito.
+     */
     private SplitResult splitOverflowNode(Node node) {
         int middle = (int) Math.ceil(m / 2.0);
 
@@ -552,6 +816,14 @@ public class BTree {
         return new SplitResult(p, promotedKey, promotedRecordAddress, q);
     }
 
+    /**
+     * Insere um registro no arquivo principal e indexa sua chave na árvore B.
+     *
+     * @param record registro a inserir.
+     * @return {@code true} se o registro foi inserido; {@code false} se a chave já existia.
+     * @throws IllegalArgumentException se o registro for nulo.
+     * @throws IllegalStateException se não houver arquivo principal associado.
+     */
     public boolean insertRecord(Record record) {
         if (record == null) {
             throw new IllegalArgumentException("record não pode ser null");
@@ -568,6 +840,13 @@ public class BTree {
         return true;
     }
 
+    /**
+     * Busca um registro por chave usando o índice da árvore B.
+     *
+     * @param key chave do registro desejado.
+     * @return registro encontrado, ou {@code null} se a chave não existir.
+     * @throws IllegalStateException se a chave existir no índice e não houver arquivo principal associado.
+     */
     public Record searchRecord(int key) {
         SearchResult result = search(key);
 
@@ -578,6 +857,12 @@ public class BTree {
         return requireMainFile().readRecord(result.getRecordAddress());
     }
 
+    /**
+     * Remove um registro do arquivo principal e sua chave correspondente do índice.
+     *
+     * @param key chave do registro a remover.
+     * @return {@code true} se a chave foi encontrada e removida; {@code false} caso contrário.
+     */
     public boolean removeRecord(int key) {
         SearchResult result = search(key);
 
@@ -594,10 +879,21 @@ public class BTree {
         return true;
     }
 
+    /**
+     * Verifica se um identificador de nó está dentro do intervalo alocado.
+     *
+     * @param id identificador de nó a verificar.
+     * @return {@code true} se o id for positivo e não exceder {@link #getMaxRecords()}.
+     */
     public boolean nodeExists(int id) {
         return id > 0 && id <= maxRecords;
     }
 
+    /**
+     * Remove todo o conteúdo da árvore B e reinicializa o arquivo de índice.
+     *
+     * <p>Quando houver arquivo principal associado, ele também é limpo.</p>
+     */
     public void clear() {
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
             root = 0;
@@ -617,6 +913,11 @@ public class BTree {
         }
     }
 
+    /**
+     * Gera uma listagem textual dos nós da árvore B.
+     *
+     * @return representação tabular dos nós ou indicação de árvore vazia.
+     */
     public String dump() {
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "r")) {
             StringBuilder sb = new StringBuilder();
@@ -639,6 +940,15 @@ public class BTree {
         }
     }
 
+    /**
+     * Acrescenta ao dump textual o nó informado e seus descendentes.
+     *
+     * @param raf arquivo de índice aberto para leitura.
+     * @param nodeId identificador do nó atual.
+     * @param sb acumulador textual do dump.
+     * @param visited conjunto de nós já visitados para evitar ciclos.
+     * @throws IOException se ocorrer falha de E/S.
+     */
     private void dumpNode(
             RandomAccessFile raf,
             int nodeId,
@@ -668,6 +978,11 @@ public class BTree {
         }
     }
 
+    /**
+     * Gera uma visualização textual hierárquica da árvore B.
+     *
+     * @return representação em níveis da árvore ou indicação de árvore vazia.
+     */
     public String plot() {
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "r")) {
             StringBuilder sb = new StringBuilder();
@@ -688,6 +1003,16 @@ public class BTree {
         }
     }
 
+    /**
+     * Acrescenta à visualização textual o nó informado e seus descendentes.
+     *
+     * @param raf arquivo de índice aberto para leitura.
+     * @param nodeId identificador do nó atual.
+     * @param level nível de indentação do nó.
+     * @param sb acumulador textual da visualização.
+     * @param visited conjunto de nós já visitados para evitar ciclos.
+     * @throws IOException se ocorrer falha de E/S.
+     */
     private void plotNode(
             RandomAccessFile raf,
             int nodeId,
@@ -728,6 +1053,12 @@ public class BTree {
         }
     }
 
+    /**
+     * Converte as chaves de um nó em uma representação entre parênteses.
+     *
+     * @param node nó cujas chaves serão formatadas.
+     * @return string contendo as chaves do nó.
+     */
     private String keysToString(Node node) {
         StringBuilder sb = new StringBuilder();
 
@@ -746,6 +1077,12 @@ public class BTree {
         return sb.toString();
     }
 
+    /**
+     * Remove uma chave da árvore B, se ela existir.
+     *
+     * @param key chave a remover.
+     * @throws RuntimeException se ocorrer falha de E/S.
+     */
     public void remove(int key) {
         try (RandomAccessFile raf = new RandomAccessFile(filePath, "rw")) {
             remove(raf, key);
@@ -754,6 +1091,13 @@ public class BTree {
         }
     }
 
+    /**
+     * Executa a remoção de chave usando um arquivo de índice já aberto.
+     *
+     * @param raf arquivo de índice aberto para leitura e escrita.
+     * @param key chave a remover.
+     * @throws IOException se ocorrer falha de E/S.
+     */
     private void remove(RandomAccessFile raf, int key) throws IOException {
         if (root == 0) {
             return;
@@ -811,6 +1155,18 @@ public class BTree {
         fixAfterRemove(raf, path, pId, p);
     }
 
+    /**
+     * Restaura as propriedades da árvore B após a remoção de uma chave.
+     *
+     * <p>O método trata underflow por redistribuição com irmãos ou por concatenação de nós,
+     * propagando ajustes até a raiz quando necessário.</p>
+     *
+     * @param raf arquivo de índice aberto para leitura e escrita.
+     * @param path caminho percorrido até o nó removido.
+     * @param pId identificador do nó que pode estar em underflow.
+     * @param p nó que pode estar em underflow.
+     * @throws IOException se ocorrer falha de E/S.
+     */
     private void fixAfterRemove(RandomAccessFile raf, Stack<PathEntry> path, int pId, Node p) throws IOException {
         while (true) {
             if (pId == root) {

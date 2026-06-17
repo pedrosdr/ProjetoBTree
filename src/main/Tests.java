@@ -4,6 +4,9 @@ import entities.BTree;
 import entities.DiskAccessCounter;
 import entities.MainFile;
 import entities.Record;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Random;
 
 public class Tests {
     public static void insertAndDelete() {
@@ -378,5 +381,91 @@ public class Tests {
         System.out.println("Total accesses após inserções = " + totalAfterInsert);
 
         System.out.println("\nTeste passou: acessos a disco foram contabilizados em BTree e MainFile.");
+    }
+
+    public static BTree createRandomBTree(
+            String indexFilePath,
+            String mainFilePath,
+            int m,
+            int amount,
+            int minKey,
+            int maxKey,
+            boolean reuseEnabled,
+            long seed
+    ) throws Exception {
+        Files.deleteIfExists(Path.of(indexFilePath));
+        Files.deleteIfExists(Path.of(mainFilePath));
+
+        BTree btree = BTree.createNew(
+                indexFilePath,
+                mainFilePath,
+                m,
+                reuseEnabled
+        );
+
+        int[] keys = generateRandomKeys(amount, minKey, maxKey, seed);
+
+        btree.getDiskAccessCounter().reset();
+
+        for (int key : keys) {
+            Record record = new Record(
+                    key,
+                    "Pessoa " + key,
+                    (short) (key % 100)
+            );
+
+            boolean inserted = btree.insertRecord(record);
+
+            if (!inserted) {
+                throw new IllegalStateException("Chave duplicada inesperada: " + key);
+            }
+        }
+
+        return btree;
+    }
+
+    private static int[] generateRandomKeys(
+            int amount,
+            int minKey,
+            int maxKey,
+            long seed
+    ) {
+        if (amount <= 0) {
+            throw new IllegalArgumentException("amount deve ser maior que zero");
+        }
+
+        if (minKey > maxKey) {
+            throw new IllegalArgumentException("minKey não pode ser maior que maxKey");
+        }
+
+        int range = maxKey - minKey + 1;
+
+        if (amount > range) {
+            throw new IllegalArgumentException(
+                    "amount não pode ser maior que a quantidade de chaves possíveis"
+            );
+        }
+
+        int[] values = new int[range];
+
+        for (int i = 0; i < range; i++) {
+            values[i] = minKey + i;
+        }
+
+        Random random = new Random(seed);
+
+        for (int i = values.length - 1; i > 0; i--) {
+            int j = random.nextInt(i + 1);
+
+            int temp = values[i];
+            values[i] = values[j];
+            values[j] = temp;
+        }
+
+        int[] result = new int[amount];
+
+        System.arraycopy(values, 0, result, 0, amount);
+
+        return result;
     }
 }

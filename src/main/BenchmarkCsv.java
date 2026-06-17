@@ -1,4 +1,9 @@
-package entities;
+package main;
+
+import entities.BTree;
+import entities.DiskAccessCounter;
+import entities.Node;
+import entities.Record;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -7,6 +12,21 @@ import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Random;
 
+/**
+ * Executa experimentos automatizados sobre a árvore B e salva os resultados em CSV.
+ *
+ * <p>O benchmark varia:</p>
+ *
+ * <ul>
+ *     <li>ordem {@code m} da árvore B;</li>
+ *     <li>quantidade de registros {@code n};</li>
+ *     <li>ordem das chaves: sequencial ou aleatória;</li>
+ *     <li>reaproveitamento de memória: habilitado ou desabilitado.</li>
+ * </ul>
+ *
+ * <p>Para cada configuração, são medidas operações de inserção, busca com sucesso,
+ * busca sem sucesso, remoção e reinserção após remoção.</p>
+ */
 public class BenchmarkCsv {
     private final Path outputCsvPath;
     private final Path dataDirectory;
@@ -14,10 +34,17 @@ public class BenchmarkCsv {
     private final int[] mValues;
     private final int[] nValues;
     private final String[] keyOrders;
+    private final boolean[] reuseOptions;
 
     private final int searchSampleSize;
     private final long randomSeed;
 
+    /**
+     * Cria um benchmark com configuração padrão.
+     *
+     * <p>O CSV será salvo em {@code btree_benchmark_results.csv}, e os arquivos
+     * binários temporários serão salvos no diretório {@code benchmark-data}.</p>
+     */
     public BenchmarkCsv() {
         this(
                 Path.of("btree_benchmark_results.csv"),
@@ -25,17 +52,31 @@ public class BenchmarkCsv {
                 new int[]{3, 10, 100, 1000},
                 new int[]{1_000, 10_000, 100_000},
                 new String[]{"sequential", "random"},
+                new boolean[]{true, false},
                 1000,
                 123456789L
         );
     }
 
+    /**
+     * Cria um benchmark com configuração personalizada.
+     *
+     * @param outputCsvPath caminho do arquivo CSV de saída.
+     * @param dataDirectory diretório onde os arquivos binários dos testes serão criados.
+     * @param mValues valores de ordem {@code m} a testar.
+     * @param nValues quantidades de registros a testar.
+     * @param keyOrders tipos de entrada: {@code sequential} e/ou {@code random}.
+     * @param reuseOptions opções de reaproveitamento: {@code true} e/ou {@code false}.
+     * @param searchSampleSize quantidade máxima de buscas em cada fase de busca.
+     * @param randomSeed semente usada para embaralhar chaves aleatórias.
+     */
     public BenchmarkCsv(
             Path outputCsvPath,
             Path dataDirectory,
             int[] mValues,
             int[] nValues,
             String[] keyOrders,
+            boolean[] reuseOptions,
             int searchSampleSize,
             long randomSeed
     ) {
@@ -59,21 +100,30 @@ public class BenchmarkCsv {
             throw new IllegalArgumentException("keyOrders não pode ser vazio");
         }
 
+        if (reuseOptions == null || reuseOptions.length == 0) {
+            throw new IllegalArgumentException("reuseOptions não pode ser vazio");
+        }
+
         if (searchSampleSize <= 0) {
             throw new IllegalArgumentException("searchSampleSize deve ser maior que zero");
         }
 
         this.outputCsvPath = outputCsvPath;
         this.dataDirectory = dataDirectory;
-        this.mValues = mValues;
-        this.nValues = nValues;
-        this.keyOrders = keyOrders;
+        this.mValues = mValues.clone();
+        this.nValues = nValues.clone();
+        this.keyOrders = keyOrders.clone();
+        this.reuseOptions = reuseOptions.clone();
         this.searchSampleSize = searchSampleSize;
         this.randomSeed = randomSeed;
     }
 
+    /**
+     * Executa todos os experimentos configurados e grava os resultados no CSV.
+     */
     public void run() {
         try {
+            createParentDirectoryIfNeeded(outputCsvPath);
             Files.createDirectories(dataDirectory);
 
             try (BufferedWriter writer = Files.newBufferedWriter(outputCsvPath)) {
@@ -84,16 +134,28 @@ public class BenchmarkCsv {
                 for (int m : mValues) {
                     for (int n : nValues) {
                         for (String keyOrder : keyOrders) {
-                            System.out.println(
-                                    "Executando experimento " + experimentId +
-                                            " | m=" + m +
-                                            " | n=" + n +
-                                            " | ordem=" + keyOrder
-                            );
+                            validateKeyOrder(keyOrder);
 
-                            runExperiment(writer, experimentId, m, n, keyOrder);
+                            for (boolean reuseEnabled : reuseOptions) {
+                                System.out.println(
+                                        "Executando experimento " + experimentId +
+                                                " | m=" + m +
+                                                " | n=" + n +
+                                                " | ordem=" + keyOrder +
+                                                " | reuseEnabled=" + reuseEnabled
+                                );
 
-                            experimentId++;
+                                runExperiment(
+                                        writer,
+                                        experimentId,
+                                        m,
+                                        n,
+                                        keyOrder,
+                                        reuseEnabled
+                                );
+
+                                experimentId++;
+                            }
                         }
                     }
                 }
@@ -110,12 +172,14 @@ public class BenchmarkCsv {
             int experimentId,
             int m,
             int n,
-            String keyOrder
+            String keyOrder,
+            boolean reuseEnabled
     ) throws IOException {
         String prefix = "exp_" + experimentId +
                 "_m_" + m +
                 "_n_" + n +
-                "_" + keyOrder;
+                "_" + keyOrder +
+                "_reuse_" + reuseEnabled;
 
         Path indexFilePath = dataDirectory.resolve(prefix + "_index.bin");
         Path mainFilePath = dataDirectory.resolve(prefix + "_main.bin");
@@ -128,16 +192,17 @@ public class BenchmarkCsv {
         BTree btree = BTree.createNew(
                 indexFilePath.toString(),
                 mainFilePath.toString(),
-                m
+                m,
+                reuseEnabled
         );
 
         btree.getDiskAccessCounter().reset();
 
-        runInsertBuild(writer, experimentId, m, n, keyOrder, btree, keys);
-        runSearchHit(writer, experimentId, m, n, keyOrder, btree, keys);
-        runSearchMiss(writer, experimentId, m, n, keyOrder, btree);
-        runRemoveHalf(writer, experimentId, m, n, keyOrder, btree, keys);
-        runReinsertReuse(writer, experimentId, m, n, keyOrder, btree);
+        runInsertBuild(writer, experimentId, m, n, keyOrder, reuseEnabled, btree, keys);
+        runSearchHit(writer, experimentId, m, n, keyOrder, reuseEnabled, btree, keys);
+        runSearchMiss(writer, experimentId, m, n, keyOrder, reuseEnabled, btree);
+        runRemoveHalf(writer, experimentId, m, n, keyOrder, reuseEnabled, btree, keys);
+        runReinsertAfterRemove(writer, experimentId, m, n, keyOrder, reuseEnabled, btree);
     }
 
     private void runInsertBuild(
@@ -146,6 +211,7 @@ public class BenchmarkCsv {
             int m,
             int n,
             String keyOrder,
+            boolean reuseEnabled,
             BTree btree,
             int[] keys
     ) throws IOException {
@@ -174,6 +240,7 @@ public class BenchmarkCsv {
                 m,
                 n,
                 keyOrder,
+                reuseEnabled,
                 "insert_build",
                 keys.length,
                 btree,
@@ -187,6 +254,7 @@ public class BenchmarkCsv {
             int m,
             int n,
             String keyOrder,
+            boolean reuseEnabled,
             BTree btree,
             int[] keys
     ) throws IOException {
@@ -218,6 +286,7 @@ public class BenchmarkCsv {
                 m,
                 n,
                 keyOrder,
+                reuseEnabled,
                 "search_hit",
                 operationCount,
                 btree,
@@ -231,6 +300,7 @@ public class BenchmarkCsv {
             int m,
             int n,
             String keyOrder,
+            boolean reuseEnabled,
             BTree btree
     ) throws IOException {
         DiskAccessCounter counter = btree.getDiskAccessCounter();
@@ -260,6 +330,7 @@ public class BenchmarkCsv {
                 m,
                 n,
                 keyOrder,
+                reuseEnabled,
                 "search_miss",
                 operationCount,
                 btree,
@@ -273,6 +344,7 @@ public class BenchmarkCsv {
             int m,
             int n,
             String keyOrder,
+            boolean reuseEnabled,
             BTree btree,
             int[] keys
     ) throws IOException {
@@ -303,6 +375,7 @@ public class BenchmarkCsv {
                 m,
                 n,
                 keyOrder,
+                reuseEnabled,
                 "remove_half",
                 operationCount,
                 btree,
@@ -310,12 +383,13 @@ public class BenchmarkCsv {
         );
     }
 
-    private void runReinsertReuse(
+    private void runReinsertAfterRemove(
             BufferedWriter writer,
             int experimentId,
             int m,
             int n,
             String keyOrder,
+            boolean reuseEnabled,
             BTree btree
     ) throws IOException {
         DiskAccessCounter counter = btree.getDiskAccessCounter();
@@ -348,7 +422,8 @@ public class BenchmarkCsv {
                 m,
                 n,
                 keyOrder,
-                "reinsert_reuse",
+                reuseEnabled,
+                "reinsert_after_remove",
                 operationCount,
                 btree,
                 metrics
@@ -356,6 +431,8 @@ public class BenchmarkCsv {
     }
 
     private int[] generateKeys(int n, String keyOrder, long seed) {
+        validateKeyOrder(keyOrder);
+
         int[] keys = new int[n];
 
         for (int i = 0; i < n; i++) {
@@ -364,8 +441,6 @@ public class BenchmarkCsv {
 
         if (keyOrder.equals("random")) {
             shuffle(keys, seed);
-        } else if (!keyOrder.equals("sequential")) {
-            throw new IllegalArgumentException("keyOrder inválido: " + keyOrder);
         }
 
         return keys;
@@ -383,12 +458,22 @@ public class BenchmarkCsv {
         }
     }
 
+    private void validateKeyOrder(String keyOrder) {
+        if (!keyOrder.equals("sequential") && !keyOrder.equals("random")) {
+            throw new IllegalArgumentException(
+                    "keyOrder inválido: " + keyOrder +
+                            ". Use 'sequential' ou 'random'."
+            );
+        }
+    }
+
     private void writeHeader(BufferedWriter writer) throws IOException {
         writer.write(String.join(",",
                 "experiment_id",
                 "m",
                 "n",
                 "key_order",
+                "reuse_enabled",
                 "phase",
                 "operation_count",
                 "btree_reads",
@@ -406,11 +491,11 @@ public class BenchmarkCsv {
                 "height",
                 "index_file_bytes",
                 "main_file_bytes",
+                "total_file_bytes",
                 "btree_max_nodes",
                 "mainfile_max_records",
                 "btree_free_stack",
-                "mainfile_free_stack",
-                "reuse_enabled"
+                "mainfile_free_stack"
         ));
 
         writer.newLine();
@@ -422,6 +507,7 @@ public class BenchmarkCsv {
             int m,
             int n,
             String keyOrder,
+            boolean reuseEnabled,
             String phase,
             int operationCount,
             BTree btree,
@@ -429,6 +515,7 @@ public class BenchmarkCsv {
     ) throws IOException {
         long indexFileBytes = fileSize(btree.getFilePath());
         long mainFileBytes = fileSize(btree.getMainFile().getFilePath());
+        long totalFileBytes = indexFileBytes + mainFileBytes;
 
         int height = height(btree);
 
@@ -437,6 +524,7 @@ public class BenchmarkCsv {
                 String.valueOf(m),
                 String.valueOf(n),
                 keyOrder,
+                String.valueOf(reuseEnabled),
                 phase,
                 String.valueOf(operationCount),
                 String.valueOf(metrics.btreeReads),
@@ -454,11 +542,11 @@ public class BenchmarkCsv {
                 String.valueOf(height),
                 String.valueOf(indexFileBytes),
                 String.valueOf(mainFileBytes),
+                String.valueOf(totalFileBytes),
                 String.valueOf(btree.getMaxRecords()),
                 String.valueOf(btree.getMainFile().getMaxRecords()),
                 String.valueOf(btree.getFreeStack()),
-                String.valueOf(btree.getMainFile().getFreeStack()),
-                "true"
+                String.valueOf(btree.getMainFile().getFreeStack())
         ));
 
         writer.newLine();
@@ -506,6 +594,17 @@ public class BenchmarkCsv {
         return String.format(Locale.US, "%.6f", value);
     }
 
+    private void createParentDirectoryIfNeeded(Path path) throws IOException {
+        Path parent = path.getParent();
+
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+    }
+
+    /**
+     * Armazena as métricas capturadas imediatamente após cada fase do benchmark.
+     */
     private static class Metrics {
         private final long btreeReads;
         private final long btreeWrites;
